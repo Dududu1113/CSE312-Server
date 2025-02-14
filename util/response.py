@@ -40,12 +40,12 @@ class Response:
     def to_data(self):
         if "Content-Type" not in self.addHeaders:
             self.addHeaders["Content-Type"] = "text/plain; charset=utf-8"
+            self.addHeaders["Content-Length"] = str(len(self.addBody))
         url = "HTTP/1.1 " + str(self.statusCode) + " " + self.statusText + "\r\n"
         for key in self.addHeaders:
             url += key + ": " + self.addHeaders[key] + "\r\n"
         for key in self.addCookies:
             url += key + "=" + self.addCookies[key] + "\r\n"
-        url += "Content-Length: " + str(len(self.addBody)) + "\r\n"
         url += "\r\n"
         url = url.encode()+self.addBody
         return url
