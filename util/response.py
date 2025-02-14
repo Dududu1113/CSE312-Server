@@ -9,7 +9,6 @@ class Response:
         self.addHeaders = {}
         self.addCookies = {}
         self.addBody = b''
-        pass
 
     def set_status(self, code, text):
         self.statusCode = code
