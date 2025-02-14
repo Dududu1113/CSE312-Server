@@ -45,6 +45,7 @@ class Response:
             url += key + ": " + self.addHeaders[key] + "\r\n"
         for key in self.addCookies:
             url += key + "=" + self.addCookies[key] + "\r\n"
+        url += "Content-Length: " + str(len(self.addBody)) + "\r\n"
         url += "\r\n"
         url = url.encode()+self.addBody
         return url
@@ -55,6 +56,9 @@ def test1():
     res.text("hello")
     expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
     actual = res.to_data()
+    print(actual)
+    print(expected)
+    assert actual == expected
 
 
 if __name__ == '__main__':
