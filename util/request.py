@@ -11,8 +11,10 @@ class Request:
         self.cookies = {}
 
         urlsplit = request.split(b"\r\n\r\n")
-        if len(urlsplit) > 0:
+        #print (len(urlsplit))
+        if len(urlsplit) > 1:
             self.body = urlsplit[1]
+            #print(urlsplit[1])
         headers = urlsplit[0]
         self.method = headers.decode().split("\r\n")[0].split(" ")[0]
         self.path = headers.decode().split("\r\n")[0].split(" ")[1]
@@ -48,19 +50,20 @@ def test1():
     # It's recommended that you complete this test and add others, including at least one
     # test using a POST request. Also, ensure that the types of all values are correct
 
-    def test2():
-        request = Request(b'POST / HTTP/1.1\r\nHost: localhost:6666\r\nConnection: keep-alive\r\nCookie: user=abc; session=123;\r\n\r\nthis is body')
-        assert request.method == "POST"
-        assert request.path == "/"
-        assert request.http_version == "HTTP/1.1"
-        assert "Host" in request.headers
-        assert request.headers["Host"] == "localhost:6666"
-        assert "Connection" in request.headers
-        assert request.headers["Connection"] == "keep-alive"
-        assert "Cookie" in request.headers
-        assert request.cookies["user"] == "abc"
-        assert request.cookies["session"] == "123"
-        assert request.body == b'this is body'
+def test2():
+    request = Request(b'POST / HTTP/1.1\r\nHost: localhost:6666\r\nConnection: keep-alive\r\nCookie: user=abc; session=123;\r\n\r\nthis is body')
+    assert request.method == "POST"
+    assert request.path == "/"
+    assert request.http_version == "HTTP/1.1"
+    assert "Host" in request.headers
+    assert request.headers["Host"] == "localhost:6666"
+    assert "Connection" in request.headers
+    assert request.headers["Connection"] == "keep-alive"
+    assert "Cookie" in request.headers
+    assert request.cookies["user"] == "abc"
+    assert request.cookies["session"] == "123"
+    assert request.body == b'this is body'
 
 if __name__ == '__main__':
     test1()
+    test2()
