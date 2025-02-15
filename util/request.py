@@ -10,9 +10,9 @@ class Request:
         self.headers = {}
         self.cookies = {}
 
-
         urlsplit = request.split(b"\r\n\r\n")
-        self.body = urlsplit[1]
+        if len(urlsplit) > 0:
+            self.body = urlsplit[1]
         headers = urlsplit[0]
         self.method = headers.decode().split("\r\n")[0].split(" ")[0]
         self.path = headers.decode().split("\r\n")[0].split(" ")[1]
