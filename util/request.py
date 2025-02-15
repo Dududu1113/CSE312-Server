@@ -16,14 +16,17 @@ class Request:
             self.body = urlsplit[1]
             #print(urlsplit[1])
         headers = urlsplit[0]
+        print(headers)
         self.method = headers.decode().split("\r\n")[0].split(" ")[0]
         if len(headers.decode().split("\r\n")[0].split(" ")) > 1:
             self.path = headers.decode().split("\r\n")[0].split(" ")[1]
-            self.http_version = headers.decode().split("\r\n")[0].split(" ")[2]
-            headersLine = headers.decode().split("\r\n",1)[1]
+            if len(headers.decode().split("\r\n")[0].split(" ")) > 2:
+                self.http_version = headers.decode().split("\r\n")[0].split(" ")[2]
+        if len(headers.decode().split("\r\n")) > 1:
+            headersLine = headers.decode().split("\r\n", 1)[1]
             headersLineSplit = headersLine.split("\r\n")
             for header in headersLineSplit:
-                #print(header)
+               # print(header)
                 if ": " in header:
                     key, value = header.split(": ")
                     self.headers[key] = value.strip()
@@ -65,6 +68,10 @@ def test2():
     assert request.cookies["session"] == "123"
     assert request.body == b'this is body'
 
+def test3():
+    request = Request(b'POST ')
+
 if __name__ == '__main__':
     test1()
     test2()
+    test3()
