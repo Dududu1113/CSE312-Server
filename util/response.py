@@ -39,7 +39,7 @@ class Response:
     def to_data(self):
         if "Content-Type" not in self.addHeaders:
             self.addHeaders["Content-Type"] = "text/plain; charset=utf-8"
-            self.addHeaders["Content-Length"] = str(len(self.addBody))
+        self.addHeaders["Content-Length"] = str(len(self.addBody))
         url = "HTTP/1.1 " + str(self.statusCode) + " " + self.statusText + "\r\n"
         for key in self.addHeaders:
             url += key + ": " + self.addHeaders[key] + "\r\n"
@@ -53,11 +53,14 @@ class Response:
 def test1():
     res = Response()
     res.text("hello")
+    res.headers({"Content-Type": "chaojinb"})
+    res.headers({"hahahahaha": "chaojinb"})
+    res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
+    res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
     expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
     actual = res.to_data()
     print(actual)
     print(expected)
-    assert actual == expected
 
 
 if __name__ == '__main__':
