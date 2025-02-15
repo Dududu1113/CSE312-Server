@@ -17,15 +17,16 @@ class Request:
             #print(urlsplit[1])
         headers = urlsplit[0]
         self.method = headers.decode().split("\r\n")[0].split(" ")[0]
-        self.path = headers.decode().split("\r\n")[0].split(" ")[1]
-        self.http_version = headers.decode().split("\r\n")[0].split(" ")[2]
-        headersLine = headers.decode().split("\r\n",1)[1]
-        headersLineSplit = headersLine.split("\r\n")
-        for header in headersLineSplit:
-            #print(header)
-            if ": " in header:
-                key, value = header.split(": ")
-                self.headers[key] = value.strip()
+        if len(headers.decode().split("\r\n")[0].split(" ")) > 1:
+            self.path = headers.decode().split("\r\n")[0].split(" ")[1]
+            self.http_version = headers.decode().split("\r\n")[0].split(" ")[2]
+            headersLine = headers.decode().split("\r\n",1)[1]
+            headersLineSplit = headersLine.split("\r\n")
+            for header in headersLineSplit:
+                #print(header)
+                if ": " in header:
+                    key, value = header.split(": ")
+                    self.headers[key] = value.strip()
         if "Cookie" in self.headers:
             cookies = self.headers["Cookie"]
             cookieValue = cookies.split(";")
