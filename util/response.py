@@ -51,8 +51,9 @@ class Response:
         for key, value in self.addCookies.items():
             if self.addCookies[key] is not None:
                 url += f"{key}={value};"
+        url = url[:-1]
         url += "\r\n\r\n"
-        print("This issssssssss: \r\n" + url)
+        print(b"This issssssssss: " + url.encode())
         url = url.encode() + self.addBody
         return url
 
