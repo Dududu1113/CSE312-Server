@@ -5,5 +5,4 @@ from util.response import Response
 def hello_path(request, handler):
     res = Response()
     res.text("hello")
-    res.text(res.statusText)
     handler.request.sendall(res.to_data())

@@ -14,47 +14,44 @@ db = client["server"]
 messages_collection = db["CSE312"]
 
 def publicfile(request, handler):
-    mineType = {".html": "text/html",".css": "text/css",".js": "application/javascript",".jpg": "image/jpeg",".ico": "image/x-icon"}
-    file_path = request.path[len("/public"):]  # Remove "/public" prefix
-    full_path = os.path.join("public", file_path.lstrip("/"))
+    mineType = {".html": "text/html",".css": "text/css",".js": "application/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif"}
+    path = request.path.replace("/","",1)
 
-    if os.path.exists(full_path) and os.path.isfile(full_path):
-        with open(full_path, "rb") as f:
+    if os.path.exists(path):
+        with open(path, "rb") as f:
             content = f.read()
+        if len(path.split(".",1)) > 1:
+            extension = "." + path.split(".",1)[1]
+            mime_type = mineType.get(extension)
 
-        file_extension = os.path.splitext(full_path)[1]
-        mime_type = mineType.get(file_extension, "application/octet-stream")
-
-        response = Response()
-        response.bytes(content)
-        response.headers({"Content-Type": mime_type})
-
-        handler.request.sendall(response.to_data())
+            res = Response()
+            res.bytes(content)
+            res.headers({"Content-Type": mime_type})
+            handler.request.sendall(res.to_data())
     else:
-        response = Response().set_status(404, "Not Found").text("404 Not Found")
-        handler.request.sendall(response.to_data())
+        res = Response().set_status(404, "Not Found")
+        res.text("404 Not Found")
+        handler.request.sendall(res.to_data())
 
 
-def render_page(request, handler, page_file):
-    layout_path = os.path.join("public", "layout/layout.html")
-    page_path = os.path.join("public", page_file)
+def render(request, handler, page_file):
+    layout = "public/layout/layout.html"
+    page = "public/" + page_file
 
-    if os.path.exists(layout_path) and os.path.exists(page_path):
-        with open(layout_path, "r", encoding="utf-8") as layout_file:
-            layout_content = layout_file.read()
-        with open(page_path, "r", encoding="utf-8") as page_file:
-            page_content = page_file.read()
+    if os.path.exists(layout) and os.path.exists(page):
+        with open(layout, "r", encoding="utf-8") as layout_file:
+            layoutContent = layout_file.read()
+        with open(page, "r", encoding="utf-8") as page_file:
+            pageContent = page_file.read()
 
-        rendered_content = layout_content.replace("{{content}}", page_content)
-
-        response = Response()
-        response.text(rendered_content)
-        response.headers({"Content-Type": "text/html"})
-
-        handler.request.sendall(response.to_data())
+        allContent = layoutContent.replace("{{content}}", pageContent)
+        res = Response()
+        res.text(allContent)
+        res.headers({"Content-Type": "text/html"})
+        handler.request.sendall(res.to_data())
     else:
-        response = Response().set_status(404, "Not Found")
-        handler.request.sendall(response.to_data())
+        res = Response().set_status(404, "Not Found")
+        handler.request.sendall(res.to_data())
 
 def handle_create_chat(request, handler):
     """Handles POST /api/chats - Creates a new chat message"""
@@ -154,8 +151,8 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("GET", "/hello", hello_path, True)
         # TODO: Add your routes here
         self.router.add_route("GET", "/public", publicfile, False)
-        self.router.add_route("GET", "/", lambda req, hnd: render_page(req, hnd, "index.html"), True)
-        self.router.add_route("GET", "/chat", lambda req, hnd: render_page(req, hnd, "chat.html"), True)
+        self.router.add_route("GET", "/", lambda req, hnd: render(req, hnd, "index.html"), True)
+        self.router.add_route("GET", "/chat", lambda req, hnd: render(req, hnd, "chat.html"), True)
         self.router.add_route("POST", "/api/chats", handle_create_chat,False)
         self.router.add_route("GET", "/api/chats", get_chats,False)
         self.router.add_route("PATCH", "/api/chats/", update_chat,False)
