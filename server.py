@@ -52,7 +52,7 @@ def render(request, handler, page_file):
         res = Response().set_status(404, "Not Found")
         handler.request.sendall(res.to_data())
 
-def handle_create_chat(request, handler):
+def create_chat(request, handler):
     res = Response()
     body = json.loads(request.body.decode())
     content = html.escape(body.get("content", ""))
@@ -134,7 +134,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("GET", "/public", publicfile, False)
         self.router.add_route("GET", "/", lambda req, hnd: render(req, hnd, "index.html"), True)
         self.router.add_route("GET", "/chat", lambda req, hnd: render(req, hnd, "chat.html"), True)
-        self.router.add_route("POST", "/api/chats", handle_create_chat,False)
+        self.router.add_route("POST", "/api/chats", create_chat,False)
         self.router.add_route("GET", "/api/chats", get_chats,False)
         self.router.add_route("PATCH", "/api/chats/", update_chat,False)
         self.router.add_route("DELETE", "/api/chats/", delete_chat,False)
