@@ -1,5 +1,7 @@
 import json
 
+from dns.name import empty
+
 
 class Response:
     def __init__(self):
@@ -46,13 +48,20 @@ class Response:
             if self.addHeaders[key] is not None:
                 url += f"{key}: {value}\r\n"
         print(self.addCookies)
-        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
+        print(len(self.addCookies))
+        if len(self.addCookies) > 0 and "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
             url += "Set-Cookie: "
         for key, value in self.addCookies.items():
             if self.addCookies[key] is not None:
                 url += f"{key}={value};"
-        url = url[:-1]
-        url += "\r\n\r\n"
+        if url[-1] == ";":
+            url = url[:-1]
+        print(b''+url.encode())
+        print(b"iiiiiiiiiiiiii" + url[-1].encode())
+        if url[-1] == "\n":
+            url += "\r\n"
+        else:
+            url += "\r\n\r\n"
         print(b"This issssssssss: " + url.encode())
         url = url.encode() + self.addBody
         return url
