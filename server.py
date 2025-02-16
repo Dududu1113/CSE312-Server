@@ -74,7 +74,7 @@ def create_chat(request, handler):
 
     if "Cookie: " not in request.headers:
         res.cookies({"session":session_id})
-    res.text(res.statusText + res.statusText)
+    res.text(res.statusCode + res.statusText)
     handler.request.sendall(res.to_data())
 
 def get_chats(request, handler):
