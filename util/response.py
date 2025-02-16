@@ -56,13 +56,13 @@ class Response:
                 url += f"{key}={value};"
         if url[-1] == ";":
             url = url[:-1]
-        print(b''+url.encode())
-        print(b"iiiiiiiiiiiiii" + url[-1].encode())
+        # print(b''+url.encode())
+        # print(b"iiiiiiiiiiiiii" + url[-1].encode())
         if url[-1] == "\n":
             url += "\r\n"
         else:
             url += "\r\n\r\n"
-        print(b"This issssssssss: " + url.encode())
+        # print(b"This issssssssss: " + url.encode())
         url = url.encode() + self.addBody
         return url
 
