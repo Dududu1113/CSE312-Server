@@ -14,7 +14,7 @@ db = client["server"]
 messages_collection = db["CSE312"]
 
 def publicfile(request, handler):
-    mineType = {".html": "text/html",".css": "text/css",".js": "application/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif"}
+    mineType = {".html": "text/html",".css": "text/css",".js": "application/javascript",".jpg": "image/jpg",".ico": "image/x-icon",".gif": "image/gif",".jpeg": "image/jpeg"}
     path = request.path.replace("/","",1)
 
     if os.path.exists(path):
