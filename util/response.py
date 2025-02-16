@@ -40,18 +40,18 @@ class Response:
         if "Content-Type" not in self.addHeaders:
             self.addHeaders["Content-Type"] = "text/plain; charset=utf-8"
         print(str(len(self.addBody)))
-        self.addHeaders["Content-Length"] = str(len(self.addBody))
-        url = "HTTP/1.1 " + str(self.statusCode) + " " + self.statusText + "\r\n"
+        url = f"HTTP/1.1 {self.statusCode} {self.statusText}\r\n"
         # print(self.addHeaders)
         # print(self.addCookies)
-        for key in self.addHeaders:
+        self.addHeaders["Content-Length"] = str(len(self.addBody))
+        for key, value in self.addHeaders.items():
             if self.addHeaders[key] is not None:
-                url += key + ": " + self.addHeaders[key] + "\r\n"
+                url += f"{key}: {value}\r\n"
         if "Cookie: " not in self.addHeaders:
             url+="Set-Cookie: "
-        for key in self.addCookies:
+        for key, value in self.addCookies.items():
             if self.addCookies[key] is not None:
-                url += key + "=" + self.addCookies[key] + ";"
+                url += f"Set-Cookie: {key}={value};"
         url += "\r\n\r\n"
         print("This issssssssss: " + url)
         url = url.encode()+self.addBody
@@ -60,7 +60,7 @@ class Response:
 
 def test1():
     res = Response()
-    #res.text(None)
+    res.text("      ")
     res.headers({"Content-Type": "chaojinb"})
     # res.headers({"hahahahaha": "chaojinb"})
     # res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
