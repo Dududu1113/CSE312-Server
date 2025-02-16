@@ -53,7 +53,7 @@ def render_page(request, handler, page_file):
 
         handler.request.sendall(response.to_data())
     else:
-        response = Response().set_status(404, "Not Found").text("404 Not Found")
+        response = Response().set_status(404, "Not Found")
         handler.request.sendall(response.to_data())
 
 def handle_create_chat(request, handler):
@@ -64,8 +64,8 @@ def handle_create_chat(request, handler):
 
     # Retrieve session cookie
     session_id = request.cookies.get("session")
-    print(request.cookies)
-    print("session_id", session_id)
+    # print(request.cookies)
+    # print("session_id", session_id)
     chat_id = str(uuid.uuid4())
     if not session_id:
         session_id = str(uuid.uuid4())  # Generate new session ID
@@ -88,6 +88,7 @@ def handle_create_chat(request, handler):
 
     if "Cookie: " not in request.headers:
         response.cookies({"session":session_id})
+    response.text(response.statusText + response.statusText)
     handler.request.sendall(response.to_data())
 
 def get_chats(request, handler):
@@ -126,7 +127,7 @@ def delete_chat(request, handler):
 
     # Find the message in DB
     message = messages_collection.find_one({"id": chat_id})
-    print(message)
+    #print(message)
     if not message:
         response = Response().set_status(404, "Not Found").text("Message not found.")
         handler.request.sendall(response.to_data())
@@ -134,8 +135,8 @@ def delete_chat(request, handler):
 
     # Check if user owns the message
     session_id = request.cookies.get("session")
-    print(request.cookies)
-    print("session_id", session_id)
+    # print(request.cookies)
+    # print("session_id", session_id)
     if session_id != message["session_id"]:
         response = Response().set_status(403, "Forbidden").text("You can only delete your own messages.")
         handler.request.sendall(response.to_data())

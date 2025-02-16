@@ -17,4 +17,5 @@ class Router:
                     return
         res = Response()
         res.text("404 Not Found")
+        res.set_status(404,"Not Found")
         handler.request.sendall(res.to_data())
