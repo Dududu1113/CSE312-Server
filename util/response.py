@@ -46,11 +46,12 @@ class Response:
         for key, value in self.addHeaders.items():
             if self.addHeaders[key] is not None:
                 url += f"{key}: {value}\r\n"
-        if "Cookie: " not in self.addHeaders:
-            url+="Cookie: "
+        print(self.addCookies)
+        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
+            url+="Set-Cookie: "
         for key, value in self.addCookies.items():
             if self.addCookies[key] is not None:
-                url += f"Cookie: {key}={value};"
+                url += f"{key}={value};"
         url += "\r\n\r\n"
         print("This issssssssss: \r\n" + url)
         url = url.encode()+self.addBody
