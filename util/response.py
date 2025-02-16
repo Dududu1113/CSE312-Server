@@ -52,7 +52,6 @@ class Response:
             if self.addCookies[key] is not None:
                 url += f"Set-Cookie: {key}={value};"
         url += "\r\n\r\n"
-        print("This issssssssss Body: " + self.addBody.decode())
         print("This issssssssss: \r\n" + url)
         url = url.encode()+self.addBody
         return url
