@@ -15,13 +15,11 @@ class Response:
         return self
 
     def headers(self, headers):
-        for header in headers:
-            self.addHeaders[header] = headers[header]
+        self.addHeaders.update(headers)
         return self
 
     def cookies(self, cookie):
-        for cookii in cookie:
-            self.addCookies[cookii] = cookie[cookii]
+        self.addCookies.update(cookie)
         return self
 
     def bytes(self, data):
