@@ -40,8 +40,6 @@ class Request:
             cookies = self.headers["Cookie"]
             cookieValue = cookies.split(";")
             for cookie in cookieValue:
-                if "Set-Cookie" in cookie:
-                    cookie = cookie.split("=",1)[1]
                 if "=" in cookie:
                     key, value = cookie.split("=", 1)
                     self.cookies[key.strip()] = value.strip()

@@ -41,13 +41,17 @@ class Response:
             self.addHeaders["Content-Type"] = "text/plain; charset=utf-8"
         self.addHeaders["Content-Length"] = str(len(self.addBody))
         url = "HTTP/1.1 " + str(self.statusCode) + " " + self.statusText + "\r\n"
+        print(self.addHeaders)
+        print(self.addCookies)
         for key in self.addHeaders:
             if self.addHeaders[key] is not None:
                 url += key + ": " + self.addHeaders[key] + "\r\n"
+        if "Cookie: " not in self.addHeaders:
+            url+="Set-Cookie: "
         for key in self.addCookies:
             if self.addCookies[key] is not None:
-                url += key + "=" + self.addCookies[key] + "\r\n"
-        url += "\r\n"
+                url += key + "=" + self.addCookies[key] + ";"
+        url += "\r\n\r\n"
         url = url.encode()+self.addBody
         return url
 
@@ -55,14 +59,13 @@ class Response:
 def test1():
     res = Response()
     #res.text(None)
-    # res.headers({"Content-Type": "chaojinb"})
+    res.headers({"Content-Type": "chaojinb"})
     # res.headers({"hahahahaha": "chaojinb"})
     # res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
     res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
     expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
     actual = res.to_data()
     print(actual)
-    print(expected)
 
 
 if __name__ == '__main__':

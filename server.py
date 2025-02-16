@@ -86,8 +86,8 @@ def handle_create_chat(request, handler):
 
     messages_collection.insert_one(message)
 
-    if request.cookies is not None:
-        response.cookies({"Set-Cookie": f"session={session_id}"})
+    if "Cookie: " not in request.headers:
+        response.cookies({"session":session_id})
     handler.request.sendall(response.to_data())
 
 def get_chats(request, handler):
