@@ -1,5 +1,4 @@
 import json
-from http import cookies
 
 
 class Response:
@@ -45,23 +44,20 @@ class Response:
         # print(self.addHeaders)
         # print(self.addCookies)
         self.addHeaders["Content-Length"] = str(len(self.addBody))
-        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
-            self.addHeaders["Cookie"] = ""
         for key, value in self.addHeaders.items():
+            print
             if self.addHeaders[key] is not None:
-                if key == "Cookie":
-                    temp = ''
-                    for key2, value2 in self.addCookies.items():
-                        if self.addCookies[key2] is not None:
-                            temp += f"{key2}={value2};"
-                    url += f"{key}: {temp}\r\n"
-                    continue
                 url += f"{key}: {value}\r\n"
         print(self.addCookies)
-        url += "\r\n"
-        print(self.addBody)
-        print("This issssssssss: \r\n" + str(url))
-        url = url.encode()+self.addBody
+        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
+            url += "Set-Cookie: "
+        for key, value in self.addCookies.items():
+            if self.addCookies[key] is not None:
+                url += f"{key}={value};"
+        url = url[:-1]
+        url += "\r\n\r\n"
+        url = url.encode() + self.addBody
+        print(B"This issssssssss:" + url)
         return url
 
 
