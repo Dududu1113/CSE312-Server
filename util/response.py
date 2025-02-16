@@ -39,7 +39,6 @@ class Response:
     def to_data(self):
         if "Content-Type" not in self.addHeaders:
             self.addHeaders["Content-Type"] = "text/plain; charset=utf-8"
-        print(str(len(self.addBody)))
         url = f"HTTP/1.1 {self.statusCode} {self.statusText}\r\n"
         # print(self.addHeaders)
         # print(self.addCookies)
@@ -53,7 +52,7 @@ class Response:
             if self.addCookies[key] is not None:
                 url += f"Set-Cookie: {key}={value};"
         url += "\r\n\r\n"
-        print("This issssssssss: " + url)
+        print("This issssssssss: \r\n" + url)
         url = url.encode()+self.addBody
         return url
 

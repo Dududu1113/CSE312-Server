@@ -14,7 +14,7 @@ db = client["server"]
 messages_collection = db["CSE312"]
 
 def publicfile(request, handler):
-    mineType = {".html": "text/html",".css": "text/css",".js": "application/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".jpeg": "image/jpeg",".webp": "image/webp",".png": "image/png"}
+    mineType = {".html": "text/html",".css": "text/css",".js": "application/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".webp": "image/webp",".png": "image/png"}
     path = request.path.replace("/","",1)
 
     if os.path.exists(path):
@@ -22,7 +22,7 @@ def publicfile(request, handler):
             content = f.read()
         if len(path.split(".",1)) > 1:
             extension = "." + path.split(".",1)[1]
-            mine_type = {"Content-Type": mineType.get(extension),"Content-Length": str(len(content))}
+            mine_type = {"MIME-Type": mineType.get(extension),"Content-Length": str(len(content))}
             res = Response()
             res.bytes(content)
             res.headers(mine_type)
@@ -53,95 +53,81 @@ def render(request, handler, page_file):
         handler.request.sendall(res.to_data())
 
 def handle_create_chat(request, handler):
-    """Handles POST /api/chats - Creates a new chat message"""
-    response = Response()
-    body = json.loads(request.body.decode())  # Parse JSON request body
-    content = html.escape(body.get("content", ""))  # Escape HTML
-
-    # Retrieve session cookie
+    res = Response()
+    body = json.loads(request.body.decode())
+    content = html.escape(body.get("content", ""))
     session_id = request.cookies.get("session")
     # print(request.cookies)
     # print("session_id", session_id)
     chat_id = str(uuid.uuid4())
     if not session_id:
-        session_id = str(uuid.uuid4())  # Generate new session ID
-        author = f"User-{session_id[:8]}"  # Assign a random username
+        session_id = str(uuid.uuid4())
+        user = f"User-{session_id[:8]}"
     else:
-        # Find existing user's author name
         existing_message = messages_collection.find_one({"session_id": session_id})
-        author = existing_message["author"] if existing_message else f"User-{session_id[:8]}"
+        user = existing_message["user"] if existing_message else f"User-{session_id[:8]}"
 
-    message_id = str(uuid.uuid4())  # Unique ID for message
+    message_id = str(uuid.uuid4())
     message = {
         "id": message_id,
         "session_id": session_id,
-        "author": author,
+        "user": user,
         "content": content,
         "updated": False,
     }
 
     messages_collection.insert_one(message)
-
     if "Cookie: " not in request.headers:
-        response.cookies({"session":session_id})
-    response.text(response.statusText + response.statusText)
-    handler.request.sendall(response.to_data())
+        res.cookies({"session":session_id})
+    res.text(res.statusText + res.statusText)
+    handler.request.sendall(res.to_data())
 
 def get_chats(request, handler):
-    all_messages = list(messages_collection.find({}, {"_id": 0, "session": 0}))  # Exclude MongoDB ID & session
+    all_messages = list(messages_collection.find({}, {"_id": 0, "session": 0}))
     response_data = {"messages": all_messages}
-
-    response = Response().json(response_data)
-    handler.request.sendall(response.to_data())
+    res = Response().json(response_data)
+    handler.request.sendall(res.to_data())
 
 def update_chat(request, handler):
-    chat_id = request.path.split("/")[-1]  # Extract message ID from URL
+    chat_id = request.path.split("/")[-1]
     data = json.loads(request.body.decode())
-    new_content = html.escape(data["content"])  # Escape HTML
-
-    # Find the message in DB
+    new_content = html.escape(data["content"])
     message = messages_collection.find_one({"id": chat_id})
     if not message:
-        response = Response().set_status(404, "Not Found").text("Message not found.")
-        handler.request.sendall(response.to_data())
+        res = Response().set_status(404, "Not Found").text("Message not found.")
+        handler.request.sendall(res.to_data())
         return
 
-    # Check if user owns the message
     session_id = request.cookies.get("session")
     if session_id != message["session_id"]:
-        response = Response().set_status(403, "Forbidden").text("You can only update your own messages.")
-        handler.request.sendall(response.to_data())
+        res = Response().set_status(403, "Forbidden").text("You can only update your own messages.")
+        handler.request.sendall(res.to_data())
         return
 
-    # Update the message
     messages_collection.update_one({"id": chat_id}, {"$set": {"content": new_content, "updated": True}})
-    response = Response().text("Message updated successfully.")
-    handler.request.sendall(response.to_data())
+    res = Response().text("Message updated successfully.")
+    handler.request.sendall(res.to_data())
 
 def delete_chat(request, handler):
-    chat_id = request.path.split("/")[-1]  # Extract message ID from URL
-
-    # Find the message in DB
+    chat_id = request.path.split("/")[-1]
     message = messages_collection.find_one({"id": chat_id})
     #print(message)
     if not message:
-        response = Response().set_status(404, "Not Found").text("Message not found.")
-        handler.request.sendall(response.to_data())
+        res = Response().set_status(404, "Not Found").text("Message not found.")
+        handler.request.sendall(res.to_data())
         return
 
-    # Check if user owns the message
     session_id = request.cookies.get("session")
     # print(request.cookies)
     # print("session_id", session_id)
     if session_id != message["session_id"]:
-        response = Response().set_status(403, "Forbidden").text("You can only delete your own messages.")
-        handler.request.sendall(response.to_data())
+        res = Response().set_status(403, "Forbidden").text("You can only delete your own messages.")
+        handler.request.sendall(res.to_data())
         return
 
-    # Delete the message
     messages_collection.delete_one({"id": chat_id})
-    response = Response().text("Message deleted successfully.")
-    handler.request.sendall(response.to_data())
+    res = Response().text("Message deleted successfully.")
+    handler.request.sendall(res.to_data())
 
 class MyTCPHandler(socketserver.BaseRequestHandler):
 
