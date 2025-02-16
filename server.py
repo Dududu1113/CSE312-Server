@@ -22,7 +22,7 @@ def publicfile(request, handler):
             content = f.read()
         if len(path.split(".",1)) > 1:
             extension = "." + path.split(".",1)[1]
-            mine_type = {"MIME-Type": mineType.get(extension),"Content-Length": str(len(content))}
+            mine_type = {"Content-Type": mineType.get(extension),"Content-Length": str(len(content))}
             res = Response()
             res.bytes(content)
             res.headers(mine_type)
