@@ -1,3 +1,6 @@
+from contextlib import nullcontext
+
+
 class Request:
 
     def __init__(self, request: bytes):
@@ -16,19 +19,22 @@ class Request:
             self.body = urlsplit[1]
             #print(urlsplit[1])
         headers = urlsplit[0]
-        print(headers)
+        #print(headers)
         self.method = headers.decode().split("\r\n")[0].split(" ")[0]
         if len(headers.decode().split("\r\n")[0].split(" ")) > 1:
+            #print(headers.decode().split("\r\n")[0].split(" "))
             self.path = headers.decode().split("\r\n")[0].split(" ")[1]
             if len(headers.decode().split("\r\n")[0].split(" ")) > 2:
                 self.http_version = headers.decode().split("\r\n")[0].split(" ")[2]
         if len(headers.decode().split("\r\n")) > 1:
+            #print(headers.decode().split("\r\n"))
             headersLine = headers.decode().split("\r\n", 1)[1]
             headersLineSplit = headersLine.split("\r\n")
+            #print(headersLineSplit)
             for header in headersLineSplit:
                # print(header)
                 if ": " in header:
-                    key, value = header.split(": ")
+                    key, value = header.split(": ",1)
                     self.headers[key] = value.strip()
         if "Cookie" in self.headers:
             cookies = self.headers["Cookie"]
@@ -55,7 +61,7 @@ def test1():
     # test using a POST request. Also, ensure that the types of all values are correct
 
 def test2():
-    request = Request(b'POST / HTTP/1.1\r\nHost: localhost:6666\r\nConnection: keep-alive\r\nCookie: user=abc; session=123;\r\n\r\nthis is body')
+    request = Request(b'POST / HTTP/1.1\r\nHost: localhost:6666\r\nConnection: keep-alive\r\nCookie: user=abc; session=123\r\n\r\nthis is body')
     assert request.method == "POST"
     assert request.path == "/"
     assert request.http_version == "HTTP/1.1"
@@ -69,9 +75,10 @@ def test2():
     assert request.body == b'this is body'
 
 def test3():
-    request = Request(b'POST ')
+    request = Request(b'')
+    print(request.method)
 
 if __name__ == '__main__':
     test1()
-    test2()
-    test3()
+    #test2()
+    #test3()

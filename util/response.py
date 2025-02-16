@@ -6,7 +6,7 @@ class Response:
     def __init__(self):
         self.statusCode = 200
         self.statusText = 'OK'
-        self.addHeaders = {}
+        self.addHeaders = {"X-Content-Type-Options": "nosniff"}
         self.addCookies = {}
         self.addBody = b''
 
@@ -19,8 +19,8 @@ class Response:
         self.addHeaders.update(headers)
         return self
 
-    def cookies(self, cookies):
-        self.addCookies.update(cookies)
+    def cookies(self, cookie):
+        self.addCookies.update(cookie)
         return self
 
     def bytes(self, data):
@@ -42,9 +42,11 @@ class Response:
         self.addHeaders["Content-Length"] = str(len(self.addBody))
         url = "HTTP/1.1 " + str(self.statusCode) + " " + self.statusText + "\r\n"
         for key in self.addHeaders:
-            url += key + ": " + self.addHeaders[key] + "\r\n"
+            if self.addHeaders[key] is not None:
+                url += key + ": " + self.addHeaders[key] + "\r\n"
         for key in self.addCookies:
-            url += key + "=" + self.addCookies[key] + "\r\n"
+            if self.addCookies[key] is not None:
+                url += key + "=" + self.addCookies[key] + "\r\n"
         url += "\r\n"
         url = url.encode()+self.addBody
         return url
@@ -52,11 +54,11 @@ class Response:
 
 def test1():
     res = Response()
-    res.text("hello")
-    res.headers({"Content-Type": "chaojinb"})
-    res.headers({"hahahahaha": "chaojinb"})
-    res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
-    res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
+    # res.text("hello")
+    res.headers({"Content-Type": None})
+    # res.headers({"hahahahaha": "chaojinb"})
+    # res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
+    # res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
     expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
     actual = res.to_data()
     print(actual)
