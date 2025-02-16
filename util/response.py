@@ -43,7 +43,6 @@ class Response:
         # print(self.addCookies)
         self.addHeaders["Content-Length"] = str(len(self.addBody))
         for key, value in self.addHeaders.items():
-            print
             if self.addHeaders[key] is not None:
                 url += f"{key}: {value}\r\n"
         print(self.addCookies)
@@ -52,10 +51,9 @@ class Response:
         for key, value in self.addCookies.items():
             if self.addCookies[key] is not None:
                 url += f"{key}={value};"
-        url = url[:-1]
         url += "\r\n\r\n"
+        print("This issssssssss: \r\n" + url)
         url = url.encode() + self.addBody
-        print(B"This issssssssss:" + url)
         return url
 
 
