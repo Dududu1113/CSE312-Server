@@ -22,11 +22,10 @@ def publicfile(request, handler):
             content = f.read()
         if len(path.split(".",1)) > 1:
             extension = "." + path.split(".",1)[1]
-            mime_type = mineType.get(extension)
-
+            mine_type = {"Content-Type": mineType.get(extension),"Content-Length": str(len(content))}
             res = Response()
             res.bytes(content)
-            res.headers({"Content-Type": mime_type})
+            res.headers(mine_type)
             handler.request.sendall(res.to_data())
     else:
         res = Response().set_status(404, "Not Found")
