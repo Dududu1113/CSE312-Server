@@ -54,11 +54,11 @@ class Response:
 
 def test1():
     res = Response()
-    # res.text("hello")
-    res.headers({"Content-Type": None})
+    #res.text(None)
+    # res.headers({"Content-Type": "chaojinb"})
     # res.headers({"hahahahaha": "chaojinb"})
     # res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
-    # res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
+    res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
     expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
     actual = res.to_data()
     print(actual)

@@ -64,6 +64,7 @@ def handle_create_chat(request, handler):
 
     # Retrieve session cookie
     session_id = request.cookies.get("session")
+    print(request.cookies)
     print("session_id", session_id)
     chat_id = str(uuid.uuid4())
     if not session_id:
@@ -71,13 +72,13 @@ def handle_create_chat(request, handler):
         author = f"User-{session_id[:8]}"  # Assign a random username
     else:
         # Find existing user's author name
-        existing_message = messages_collection.find_one({"author_id": session_id})
+        existing_message = messages_collection.find_one({"session_id": session_id})
         author = existing_message["author"] if existing_message else f"User-{session_id[:8]}"
 
     message_id = str(uuid.uuid4())  # Unique ID for message
     message = {
         "id": message_id,
-        "author_id": session_id,
+        "session_id": session_id,
         "author": author,
         "content": content,
         "updated": False,
@@ -85,8 +86,8 @@ def handle_create_chat(request, handler):
 
     messages_collection.insert_one(message)
 
-    response = Response().set_status(200, "OK").text("Great work sending a chat message!!")
-    response.cookies({"Set-Cookie": f"session={session_id}"})
+    if request.cookies is not None:
+        response.cookies({"Set-Cookie": f"session={session_id}"})
     handler.request.sendall(response.to_data())
 
 def get_chats(request, handler):
@@ -110,7 +111,7 @@ def update_chat(request, handler):
 
     # Check if user owns the message
     session_id = request.cookies.get("session")
-    if session_id != message["session"]:
+    if session_id != message["session_id"]:
         response = Response().set_status(403, "Forbidden").text("You can only update your own messages.")
         handler.request.sendall(response.to_data())
         return
@@ -125,6 +126,7 @@ def delete_chat(request, handler):
 
     # Find the message in DB
     message = messages_collection.find_one({"id": chat_id})
+    print(message)
     if not message:
         response = Response().set_status(404, "Not Found").text("Message not found.")
         handler.request.sendall(response.to_data())
@@ -132,7 +134,9 @@ def delete_chat(request, handler):
 
     # Check if user owns the message
     session_id = request.cookies.get("session")
-    if session_id != message["session"]:
+    print(request.cookies)
+    print("session_id", session_id)
+    if session_id != message["session_id"]:
         response = Response().set_status(403, "Forbidden").text("You can only delete your own messages.")
         handler.request.sendall(response.to_data())
         return

@@ -40,6 +40,8 @@ class Request:
             cookies = self.headers["Cookie"]
             cookieValue = cookies.split(";")
             for cookie in cookieValue:
+                if "Set-Cookie" in cookie:
+                    cookie = cookie.split("=",1)[1]
                 if "=" in cookie:
                     key, value = cookie.split("=", 1)
                     self.cookies[key.strip()] = value.strip()
@@ -79,6 +81,6 @@ def test3():
     print(request.method)
 
 if __name__ == '__main__':
-    test1()
-    #test2()
+    # test1()
+    test2()
     #test3()
