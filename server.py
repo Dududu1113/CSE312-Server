@@ -73,7 +73,7 @@ def create_chat(request, handler):
     messages_collection.insert_one(message)
 
     if "Cookie: " not in request.headers:
-        res.cookies({"session":session_id})
+        res.cookies({"session":session_id,"visit":4})
     res.text("message sent")
     handler.request.sendall(res.to_data())
 

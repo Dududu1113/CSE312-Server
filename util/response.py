@@ -50,7 +50,7 @@ class Response:
         print(self.addCookies)
         print(len(self.addCookies))
         if len(self.addCookies) > 0 and "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
-            url += "Set-Cookie: "
+            url += "Cookie: "
         for key, value in self.addCookies.items():
             if self.addCookies[key] is not None:
                 url += f"{key}={value};"
@@ -62,22 +62,22 @@ class Response:
             url += "\r\n"
         else:
             url += "\r\n\r\n"
-        # print(b"This issssssssss: " + url.encode())
+        print(b"This issssssssss: " + url.encode())
         url = url.encode() + self.addBody
         return url
 
 
-def test1():
-    res = Response()
-    res.text("      ")
-    res.headers({"Content-Type": "chaojinb"})
-    # res.headers({"hahahahaha": "chaojinb"})
-    # res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
-    res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
-    expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
-    actual = res.to_data()
-    print(actual)
-
-
-if __name__ == '__main__':
-    test1()
+# def test1():
+#     res = Response()
+#     res.text("      ")
+#     res.headers({"Content-Type": "chaojinb"})
+#     # res.headers({"hahahahaha": "chaojinb"})
+#     # res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
+#     res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
+#     expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
+#     actual = res.to_data()
+#     print(actual)
+#
+#
+# if __name__ == '__main__':
+#     test1()
