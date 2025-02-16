@@ -16,11 +16,13 @@ class Response:
         return self
 
     def headers(self, headers):
-        self.addHeaders.update(headers)
+        for header in headers:
+            self.addHeaders[header] = headers[header]
         return self
 
     def cookies(self, cookie):
-        self.addCookies.update(cookie)
+        for cookii in cookie:
+            self.addCookies[cookii] = cookie[cookii]
         return self
 
     def bytes(self, data):
@@ -43,17 +45,22 @@ class Response:
         # print(self.addHeaders)
         # print(self.addCookies)
         self.addHeaders["Content-Length"] = str(len(self.addBody))
+        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
+            self.addHeaders["Cookie"] = ""
         for key, value in self.addHeaders.items():
             if self.addHeaders[key] is not None:
+                if key == "Cookie":
+                    temp = ''
+                    for key2, value2 in self.addCookies.items():
+                        if self.addCookies[key2] is not None:
+                            temp += f"{key2}={value2};"
+                    url += f"{key}: {temp}\r\n"
+                    continue
                 url += f"{key}: {value}\r\n"
         print(self.addCookies)
-        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
-            url+="Set-Cookie: "
-        for key, value in self.addCookies.items():
-            if self.addCookies[key] is not None:
-                url += f"{key}={value};"
-        url += "\r\n\r\n"
-        print("This issssssssss: \r\n" + url)
+        url += "\r\n"
+        print(self.addBody)
+        print("This issssssssss: \r\n" + str(url))
         url = url.encode()+self.addBody
         return url
 

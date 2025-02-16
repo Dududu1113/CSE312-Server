@@ -79,8 +79,10 @@ def create_chat(request, handler):
 
 def get_chats(request, handler):
     all_messages = list(messages_collection.find({}, {"_id": 0, "session": 0}))
+    session_id = request.cookies.get("session")
     data = {"messages": all_messages}
     res = Response().json(data)
+    res.cookies({"session": session_id})
     handler.request.sendall(res.to_data())
 
 def update_chat(request, handler):
@@ -118,6 +120,7 @@ def delete_chat(request, handler):
     # print("session_id", session_id)
     if session_id != message["session_id"]:
         res = Response().set_status(403, "Forbidden").text("You can only delete your own messages.")
+        res.cookies({"session": session_id})
         handler.request.sendall(res.to_data())
         return
 
