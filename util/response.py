@@ -4,7 +4,7 @@ from http import cookies
 
 class Response:
     def __init__(self):
-        self.statusCode = 200
+        self.statusCode = '200'
         self.statusText = 'OK'
         self.addHeaders = {"X-Content-Type-Options": "nosniff"}
         self.addCookies = {}
