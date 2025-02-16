@@ -56,27 +56,22 @@ def handle_create_chat(request, handler):
     res = Response()
     body = json.loads(request.body.decode())
     content = html.escape(body.get("content", ""))
+
     session_id = request.cookies.get("session")
     # print(request.cookies)
     # print("session_id", session_id)
     chat_id = str(uuid.uuid4())
     if not session_id:
         session_id = str(uuid.uuid4())
-        user = f"User-{session_id[:8]}"
+        author = f"User-{session_id[:8]}"
     else:
         existing_message = messages_collection.find_one({"session_id": session_id})
-        user = existing_message["user"] if existing_message else f"User-{session_id[:8]}"
+        author = existing_message["author"] if existing_message else f"User-{session_id[:8]}"
 
     message_id = str(uuid.uuid4())
-    message = {
-        "id": message_id,
-        "session_id": session_id,
-        "user": user,
-        "content": content,
-        "updated": False,
-    }
-
+    message = {"id": message_id,"session_id": session_id,"author": author,"content": content,"updated": False}
     messages_collection.insert_one(message)
+
     if "Cookie: " not in request.headers:
         res.cookies({"session":session_id})
     res.text(res.statusText + res.statusText)
@@ -84,14 +79,15 @@ def handle_create_chat(request, handler):
 
 def get_chats(request, handler):
     all_messages = list(messages_collection.find({}, {"_id": 0, "session": 0}))
-    response_data = {"messages": all_messages}
-    res = Response().json(response_data)
+    data = {"messages": all_messages}
+    res = Response().json(data)
     handler.request.sendall(res.to_data())
 
 def update_chat(request, handler):
     chat_id = request.path.split("/")[-1]
     data = json.loads(request.body.decode())
     new_content = html.escape(data["content"])
+
     message = messages_collection.find_one({"id": chat_id})
     if not message:
         res = Response().set_status(404, "Not Found").text("Message not found.")
