@@ -42,47 +42,33 @@ class Response:
         # print(self.addHeaders)
         # print(self.addCookies)
         self.addHeaders["Content-Length"] = str(len(self.addBody))
-        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
-            self.addHeaders["Cookie"] = ""
         for key, value in self.addHeaders.items():
             if self.addHeaders[key] is not None:
-                if key == "Cookie":
-                    temp = ''
-                    for key2, value2 in self.addCookies.items():
-                        if self.addCookies[key2] is not None:
-                            temp += f"{key2}={value2};"
-                    url += f"{key}: {temp}\r\n"
-                    continue
                 url += f"{key}: {value}\r\n"
-        url += "\r\n"
-        #print("hereeeeeeeeeeeeeeeeeeeeeeee")
-        if len(url.split("\r\n\r\n")) > 1:
-            if url.split("\r\n\r\n")[0][-1] == ";":
-                url = url.split("\r\n\r\n")[0][:-1]
-                url += "\r\n\r\n"
-        print(self.addCookies)
+        for key, value in self.addCookies.items():
+            if self.addCookies[key] is not None:
+                url += f"Set-Cookie: {key}={value};"
+        if url[-1] == ";":
+            url = url[:-1]
         # print(b''+url.encode())
         # print(b"iiiiiiiiiiiiii" + url[-1].encode())
-        # if url[-1] == "\n":
-        #     url += "\r\n"
-        # else:
-        #     url += "\r\n\r\n"
-        print(b"This issssssssss: " + url.encode("utf-8"))
-        url = url.encode("utf-8") + self.addBody
+        if url[-1] == "\n":
+            url += "\r\n"
+        else:
+            url += "\r\n\r\n"
+        # print(b"This issssssssss: " + url.encode())
+        url = url.encode() + self.addBody
         return url
 
 
-# def test1():
-#     res = Response()
-#     res.text("      ")
-#     res.headers({"Content-Type": "chaojinb"})
-#     # res.headers({"hahahahaha": "chaojinb"})
-#     # res.cookies({"cookie1": "cookie1", "cookie2": "cookie2"})
-#     res.cookies({"cookie3": "cookie4", "cookie5": "cookie6"})
-#     expected = b'HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
-#     actual = res.to_data()
-#     print(actual)
-#
-#
-# if __name__ == '__main__':
-#     test1()
+def test1():
+    res = Response()
+    res.text("hello")
+    expected = b'HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello'
+    actual = res.to_data()
+    print(actual)
+    print(expected)
+
+
+if __name__ == '__main__':
+    test1()
