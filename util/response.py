@@ -56,7 +56,7 @@ class Response:
             url += "\r\n"
         else:
             url += "\r\n\r\n"
-        # print(b"This issssssssss: " + url.encode())
+        print(b"This issssssssss: " + url.encode())
         url = url.encode() + self.addBody
         return url
 
