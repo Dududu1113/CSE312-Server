@@ -1,7 +1,5 @@
 import json
 
-from dns.name import empty
-
 
 class Response:
     def __init__(self):
@@ -29,11 +27,11 @@ class Response:
         return self
 
     def text(self, data):
-        self.addBody += data.encode()
+        self.addBody += data.encode("utf-8")
         return self
 
     def json(self, data):
-        self.addBody = json.dumps(data).encode()
+        self.addBody = json.dumps(data).encode("utf-8")
         self.addHeaders['Content-Type'] = 'application/json'
         return self
 
@@ -44,26 +42,33 @@ class Response:
         # print(self.addHeaders)
         # print(self.addCookies)
         self.addHeaders["Content-Length"] = str(len(self.addBody))
+        if "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
+            self.addHeaders["Cookie"] = ""
         for key, value in self.addHeaders.items():
             if self.addHeaders[key] is not None:
+                if key == "Cookie":
+                    temp = ''
+                    for key2, value2 in self.addCookies.items():
+                        if self.addCookies[key2] is not None:
+                            temp += f"{key2}={value2};"
+                    url += f"{key}: {temp}\r\n"
+                    continue
                 url += f"{key}: {value}\r\n"
+        url += "\r\n"
+        #print("hereeeeeeeeeeeeeeeeeeeeeeee")
+        if len(url.split("\r\n\r\n")) > 1:
+            if url.split("\r\n\r\n")[0][-1] == ";":
+                url = url.split("\r\n\r\n")[0][:-1]
+                url += "\r\n\r\n"
         print(self.addCookies)
-        print(len(self.addCookies))
-        if len(self.addCookies) > 0 and "Set-Cookie: " not in self.addHeaders and "Cookie: " not in self.addHeaders:
-            url += "Cookie: "
-        for key, value in self.addCookies.items():
-            if self.addCookies[key] is not None:
-                url += f"{key}={value};"
-        if url[-1] == ";":
-            url = url[:-1]
         # print(b''+url.encode())
         # print(b"iiiiiiiiiiiiii" + url[-1].encode())
-        if url[-1] == "\n":
-            url += "\r\n"
-        else:
-            url += "\r\n\r\n"
-        print(b"This issssssssss: " + url.encode())
-        url = url.encode() + self.addBody
+        # if url[-1] == "\n":
+        #     url += "\r\n"
+        # else:
+        #     url += "\r\n\r\n"
+        print(b"This issssssssss: " + url.encode("utf-8"))
+        url = url.encode("utf-8") + self.addBody
         return url
 
 
