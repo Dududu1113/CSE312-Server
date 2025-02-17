@@ -38,27 +38,19 @@ class Response:
     def to_data(self):
         if "Content-Type" not in self.addHeaders:
             self.addHeaders["Content-Type"] = "text/plain; charset=utf-8"
-        url = f"HTTP/1.1 {self.statusCode} {self.statusText}\r\n"
-        # print(self.addHeaders)
-        # print(self.addCookies)
-        self.addHeaders["Content-Length"] = str(len(self.addBody))
+        response = f"HTTP/1.1 {self.statusCode} {self.statusText}\r\n"
         for key, value in self.addHeaders.items():
-            if self.addHeaders[key] is not None:
-                url += f"{key}: {value}\r\n"
+            if value is not None:
+                response += f"{key}: {value}\r\n"
         for key, value in self.addCookies.items():
-            if self.addCookies[key] is not None:
-                url += f"Set-Cookie: {key}={value};"
-        if url[-1] == ";":
-            url = url[:-1]
-        # print(b''+url.encode())
-        # print(b"iiiiiiiiiiiiii" + url[-1].encode())
-        if url[-1] == "\n":
-            url += "\r\n"
-        else:
-            url += "\r\n\r\n"
-        print(b"This issssssssss: " + url.encode())
-        url = url.encode() + self.addBody
-        return url
+            if value is not None:
+                response += f"Set-Cookie: {key}={value}\r\n"
+        response += f"Content-Length: {len(self.addBody)}\r\n"
+        response += "\r\n"
+        print(b'thisssssssssssssssssssssssss: ' + response.encode("utf-8"))
+        response = response.encode("utf-8") + self.addBody
+
+        return response
 
 
 def test1():
