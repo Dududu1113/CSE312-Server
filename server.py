@@ -69,7 +69,7 @@ def create_chat(request, handler):
         author = existing_message["author"] if existing_message else f"User-{session_id[:8]}"
 
     message_id = str(uuid.uuid4())
-    message = {"id": message_id,"session_id": session_id,"author": author,"content": content,"updated": False}
+    message = {"id": message_id,"session_id": session_id,"author": author,"content": content,"updated": False,"emoji":""}
     messages_collection.insert_one(message)
 
     if "Cookie: " not in request.headers:
@@ -128,6 +128,32 @@ def delete_chat(request, handler):
     res = Response().text("Message deleted successfully.")
     handler.request.sendall(res.to_data())
 
+def add_emoji(request, handler):
+    chat_id = request.path.split("/")[-1]
+    data = json.loads(request.body.decode())
+    new_content = html.escape(data["emoji"])
+
+    message = messages_collection.find_one({"id": chat_id})
+    if not message:
+        res = Response().set_status(404, "Not Found").text("Message not found.")
+        handler.request.sendall(res.to_data())
+        return
+
+    session_id = request.cookies.get("session")
+    if session_id != message["session_id"]:
+        res = Response().set_status(403, "Forbidden").text("You can only update your own messages.")
+        handler.request.sendall(res.to_data())
+        return
+
+    messages_collection.update_one({"id": chat_id}, {"$set": {"emoji": new_content}})
+    res = Response().text("Message updated successfully.")
+    handler.request.sendall(res.to_data())
+
+
+# def remove_emoji(request, handler):
+# def get_emoji(request, handler):
+
+
 class MyTCPHandler(socketserver.BaseRequestHandler):
 
     def __init__(self, request, client_address, server):
@@ -141,6 +167,9 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("GET", "/api/chats", get_chats,False)
         self.router.add_route("PATCH", "/api/chats/", update_chat,False)
         self.router.add_route("DELETE", "/api/chats/", delete_chat,False)
+        self.router.add_route("PATCH", "/api/reaction/", add_emoji, False)
+        # self.router.add_route("DELETE", "/api/reaction/", remove_emoji, False)
+        # self.router.add_route("GET", "/api/chat/", get_emoji, False)
         super().__init__(request, client_address, server)
 
 
