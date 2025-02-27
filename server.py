@@ -250,6 +250,10 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("PATCH", "/api/reaction/", add_reaction, False)
         self.router.add_route("DELETE", "/api/reaction/", remove_reaction, False)
         self.router.add_route("PATCH", "/api/nickname", update_nickname, False)
+        self.router.add_route("GET", "/register", lambda req, hnd: render(req, hnd, "register.html"), True)
+        self.router.add_route("GET", "/login", lambda req, hnd: render(req, hnd, "login.html"), True)
+        self.router.add_route("GET", "/settings", lambda req, hnd: render(req, hnd, "settings.html"), True)
+        self.router.add_route("GET", "/search-users", lambda req, hnd: render(req, hnd, "search-users.html"), True)
         super().__init__(request, client_address, server)
 
 
