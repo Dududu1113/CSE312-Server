@@ -304,7 +304,7 @@ def login_user(request, handler):
     user = users_collection.find_one({"username": username})
 
     if not user or not verify_password(user["password"], password):
-        res = Response().set_status(401, "Unauthorized").text("Invalid username or password.")
+        res = Response().set_status(400, "Unauthorized").text("Invalid username or password.")
         handler.request.sendall(res.to_data())
         return
 
@@ -337,6 +337,9 @@ def logout_user(request, handler):
         user = users_collection.find_one({"auth_token": hashed_token})
         if user:
             users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"auth_token": None}})
+    else:
+        res = Response().set_status(400, "Not Found").headers({"Location": "/chat"})
+        handler.request.sendall(res.to_data())
 
     res = Response().set_status(302, "Found").headers({"Location": "/chat"})
     res.cookies({"auth_token": ";Max-Age=0"})
@@ -363,21 +366,24 @@ def get_user_profile(request, handler):
     handler.request.sendall(res.to_data())
 
 def search_users(request, handler):
-    query = request.path.split("?")[1] if "?" in request.path else ""
-    query_params = query.split("&")
-    search_term = None
+    query_string = request.path.split("?")[1] if "?" in request.path else ""
+    query_params = query_string.split("&")
 
+    search_term = None
     for param in query_params:
         if param.startswith("user="):
             search_term = param.split("=")[1]
             break
-
     if not search_term:
-        res = Response().json({"users": []})
+        res = Response().json({})
         handler.request.sendall(res.to_data())
         return
 
-    users = list(users_collection.find({"username": {"$regex": f"^{search_term}"}}, {"_id": 0, "user_id": 1, "username": 1}))
+    users = list(users_collection.find(
+        {"username": {"$regex": f"^{search_term}"}},
+        {"_id": 0, "user_id": 1, "username": 1}
+    ))
+
     res = Response().json({"users": users})
     handler.request.sendall(res.to_data())
 
