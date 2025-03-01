@@ -331,6 +331,10 @@ def login_user(request, handler):
 def logout_user(request, handler):
     auth_token = request.cookies.get("auth_token")
 
+    if not users_collection.find_one({"auth_token": auth_token}):
+        res = Response().set_status(400, "Not Found").headers({"Location": "/chat"})
+        handler.request.sendall(res.to_data())
+
     if auth_token:
         hashed_token = hash_token(auth_token)
 
@@ -381,10 +385,11 @@ def search_users(request, handler):
 
     users = list(users_collection.find(
         {"username": {"$regex": f"^{search_term}"}},
-        {"_id": 0, "user_id": 1, "username": 1}
+        {"_id": 0, "id": 1, "username": 1}
     ))
 
     res = Response().json({"users": users})
+    #print(b"NOooooooooooooooooooooooooooooooooooooooooooooo"+res.to_data())
     handler.request.sendall(res.to_data())
 
 def update_profile(request, handler):
@@ -402,8 +407,26 @@ def update_profile(request, handler):
         return
 
     username, password = extract_credentials(request)
-    if not username or not password:
-        res = Response().set_status(400, "Bad Request").text("Username and password are required.")
+    if not username:
+        hashed_password = hash_password(password)
+        users_collection.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": {"password": hashed_password}}
+        )
+        res = Response().text("Profile updated successfully.")
+        handler.request.sendall(res.to_data())
+        return
+    if not password:
+        hashed_password = hash_password(password)
+        users_collection.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": {"username": username}}
+        )
+        messages_collection.update_many(
+            {"user_id": user["user_id"]},
+            {"$set": {"author": username}}
+        )
+        res = Response().text("Profile updated successfully.")
         handler.request.sendall(res.to_data())
         return
 
@@ -416,6 +439,10 @@ def update_profile(request, handler):
     users_collection.update_one(
         {"user_id": user["user_id"]},
         {"$set": {"username": username, "password": hashed_password}}
+    )
+    messages_collection.update_many(
+        {"user_id": user["user_id"]},
+        {"$set": {"author": username}}
     )
 
     res = Response().text("Profile updated successfully.")
