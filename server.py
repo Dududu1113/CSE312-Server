@@ -330,10 +330,11 @@ def login_user(request, handler):
 
 def logout_user(request, handler):
     auth_token = request.cookies.get("auth_token")
-
-    if not users_collection.find_one({"auth_token": auth_token}):
+    user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
+    if user:
         res = Response().set_status(400, "Not Found").headers({"Location": "/chat"})
         handler.request.sendall(res.to_data())
+        return
 
     if auth_token:
         hashed_token = hash_token(auth_token)
@@ -344,6 +345,7 @@ def logout_user(request, handler):
     else:
         res = Response().set_status(400, "Not Found").headers({"Location": "/chat"})
         handler.request.sendall(res.to_data())
+        return
 
     res = Response().set_status(302, "Found").headers({"Location": "/chat"})
     res.cookies({"auth_token": ";Max-Age=0"})
@@ -379,8 +381,6 @@ def search_users(request, handler):
             search_term = param.split("=")[1]
             break
     if not search_term:
-        res = Response().json({})
-        handler.request.sendall(res.to_data())
         return
 
     users = list(users_collection.find(
@@ -389,7 +389,7 @@ def search_users(request, handler):
     ))
 
     res = Response().json({"users": users})
-    #print(b"NOooooooooooooooooooooooooooooooooooooooooooooo"+res.to_data())
+    print(b"NOooooooooooooooooooooooooooooooooooooooooooooo"+res.to_data())
     handler.request.sendall(res.to_data())
 
 def update_profile(request, handler):
