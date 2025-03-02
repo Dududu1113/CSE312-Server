@@ -330,9 +330,12 @@ def login_user(request, handler):
 
 def logout_user(request, handler):
     auth_token = request.cookies.get("auth_token")
-    user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
-    if user:
-        res = Response().set_status(400, "Not Found").headers({"Location": "/chat"})
+
+    user = users_collection.find_one({"auth_token": hash_token(auth_token)})
+    print(user)
+    if user is None:
+        print("you got here")
+        res = Response().set_status(400, "Not Found1").text("No user found").headers({"Location": "/chat"})
         handler.request.sendall(res.to_data())
         return
 
@@ -343,7 +346,7 @@ def logout_user(request, handler):
         if user:
             users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"auth_token": None}})
     else:
-        res = Response().set_status(400, "Not Found").headers({"Location": "/chat"})
+        res = Response().set_status(400, "Not Found2").text("No user found").headers({"Location": "/chat"})
         handler.request.sendall(res.to_data())
         return
 
@@ -380,17 +383,15 @@ def search_users(request, handler):
         if param.startswith("user="):
             search_term = param.split("=")[1]
             break
-    if not search_term:
-        return
+    if search_term:
+        users = list(users_collection.find(
+            {"username": {"$regex": f"^{search_term}"}},
+            {"_id": 0, "id": 1, "username": 1}
+        ))
+        res = Response().json({"users": users})
+        print(b"NOooooooooooooooooooooooooooooooooooooooooooooo"+res.to_data())
+        handler.request.sendall(res.to_data())
 
-    users = list(users_collection.find(
-        {"username": {"$regex": f"^{search_term}"}},
-        {"_id": 0, "id": 1, "username": 1}
-    ))
-
-    res = Response().json({"users": users})
-    print(b"NOooooooooooooooooooooooooooooooooooooooooooooo"+res.to_data())
-    handler.request.sendall(res.to_data())
 
 def update_profile(request, handler):
     auth_token = request.cookies.get("auth_token")
@@ -417,14 +418,9 @@ def update_profile(request, handler):
         handler.request.sendall(res.to_data())
         return
     if not password:
-        hashed_password = hash_password(password)
         users_collection.update_one(
             {"user_id": user["user_id"]},
             {"$set": {"username": username}}
-        )
-        messages_collection.update_many(
-            {"user_id": user["user_id"]},
-            {"$set": {"author": username}}
         )
         res = Response().text("Profile updated successfully.")
         handler.request.sendall(res.to_data())
@@ -439,10 +435,6 @@ def update_profile(request, handler):
     users_collection.update_one(
         {"user_id": user["user_id"]},
         {"$set": {"username": username, "password": hashed_password}}
-    )
-    messages_collection.update_many(
-        {"user_id": user["user_id"]},
-        {"$set": {"author": username}}
     )
 
     res = Response().text("Profile updated successfully.")
