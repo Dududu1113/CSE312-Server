@@ -324,7 +324,7 @@ def login_user(request, handler):
         else: messages_collection.update_many({"session_id": session_id},{"$set": {"author": username,"user_id": user_id}})
 
     res.headers({"Location": "/chat"})
-    res.cookies({"auth_token": auth_token + ";Max-Age=3600;HttpOnly","session":";Max-Age=0;HttpOnly"})
+    res.cookies({"auth_token": auth_token + ";Max-Age=3600;HttpOnly","session": "deleted;Max-Age=0;HttpOnly"})
     handler.request.sendall(res.to_data())
 
 
@@ -351,8 +351,9 @@ def logout_user(request, handler):
             users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"auth_token": None}})
 
     res = Response().set_status(302, "Found").headers({"Location": "/chat"})
-    res.cookies({"auth_token": ";Max-Age=0"})
+    res.cookies({"auth_token": "deleted;Max-Age=0;HttpOnly"})
     handler.request.sendall(res.to_data())
+
 
 
 def get_user_profile(request, handler):
@@ -387,9 +388,15 @@ def search_users(request, handler):
     if not search_term:
         return
 
+
     users = list(users_collection.find({"username": {"$regex": f"^{search_term}"}}, {"_id": 0, "user_id": 1, "username": 1}))
-    res = Response().json({"users": users})
-    print(b"NOooooooooooooooooooooooooooooooooooooooooooooo" + res.to_data())
+    output = []
+    for user in users:
+        print(user)
+        output.append({"id": user["user_id"], "username": user["username"]})
+
+    res = Response().json({"users": output})
+    #print(b"NOooooooooooooooooooooooooooooooooooooooooooooo" + res.to_data())
     handler.request.sendall(res.to_data())
 
 
