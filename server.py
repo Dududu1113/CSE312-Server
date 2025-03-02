@@ -331,11 +331,15 @@ def login_user(request, handler):
 def logout_user(request, handler):
     auth_token = request.cookies.get("auth_token")
 
+    if not auth_token:
+        res = Response().set_status(400, "Not Found").text("No user found/no auth_token").headers({"Location": "/chat"})
+        handler.request.sendall(res.to_data())
+        return
+
     user = users_collection.find_one({"auth_token": hash_token(auth_token)})
     print(user)
     if user is None:
-        print("you got here")
-        res = Response().set_status(400, "Not Found1").text("No user found").headers({"Location": "/chat"})
+        res = Response().set_status(400, "Not Found").text("No user found/invalid token").headers({"Location": "/chat"})
         handler.request.sendall(res.to_data())
         return
 
@@ -345,10 +349,6 @@ def logout_user(request, handler):
         user = users_collection.find_one({"auth_token": hashed_token})
         if user:
             users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"auth_token": None}})
-    else:
-        res = Response().set_status(400, "Not Found2").text("No user found").headers({"Location": "/chat"})
-        handler.request.sendall(res.to_data())
-        return
 
     res = Response().set_status(302, "Found").headers({"Location": "/chat"})
     res.cookies({"auth_token": ";Max-Age=0"})
@@ -375,22 +375,22 @@ def get_user_profile(request, handler):
     handler.request.sendall(res.to_data())
 
 def search_users(request, handler):
-    query_string = request.path.split("?")[1] if "?" in request.path else ""
-    query_params = query_string.split("&")
-
+    query = request.path.split("?")[1] if "?" in request.path else ""
+    query_params = query.split("&")
     search_term = None
+
     for param in query_params:
         if param.startswith("user="):
             search_term = param.split("=")[1]
             break
-    if search_term:
-        users = list(users_collection.find(
-            {"username": {"$regex": f"^{search_term}"}},
-            {"_id": 0, "id": 1, "username": 1}
-        ))
-        res = Response().json({"users": users})
-        print(b"NOooooooooooooooooooooooooooooooooooooooooooooo"+res.to_data())
-        handler.request.sendall(res.to_data())
+
+    if not search_term:
+        return
+
+    users = list(users_collection.find({"username": {"$regex": f"^{search_term}"}}, {"_id": 0, "user_id": 1, "username": 1}))
+    res = Response().json({"users": users})
+    print(b"NOooooooooooooooooooooooooooooooooooooooooooooo" + res.to_data())
+    handler.request.sendall(res.to_data())
 
 
 def update_profile(request, handler):
