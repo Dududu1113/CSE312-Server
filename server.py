@@ -96,11 +96,15 @@ def create_chat(request, handler):
         try:
             if command == "repos":
                 if len(args) < 1:
-                    raise ValueError("Format: /repos username")
+                    res = Response().set_status(400, "Bad Request").text("Unknown error")
+                    handler.request.sendall(res.to_data())
+                    return
                 username = args[0]
                 response = requests.get(f"https://api.github.com/users/{username}/repos", headers=headers)
                 if response.status_code != 200:
-                    raise ValueError(f"Error: {response.json().get('message', 'Unknown error')}")
+                    res = Response().set_status(400, "Bad Request").text("Unknown error")
+                    handler.request.sendall(res.to_data())
+                    return
 
                 repos = response.json()[:50]
                 repo_links = [f'<a href="{repo["html_url"]}">{repo["name"]}</a>' for repo in repos]
@@ -108,16 +112,22 @@ def create_chat(request, handler):
 
             elif command == "star":
                 if len(args) < 1 or '/' not in args[0]:
-                    raise ValueError("Format: /star owner/repo")
+                    res = Response().set_status(400, "Bad Request").text("Unknown error")
+                    handler.request.sendall(res.to_data())
+                    return
                 repo = args[0]
                 response = requests.put(f"https://api.github.com/user/starred/{repo}", headers=headers)
                 if response.status_code not in [204, 304]:
-                    raise ValueError(f"Error: {response.json().get('message', 'Unknown error')}")
+                    res = Response().set_status(400, "Bad Request").text("Unknown error")
+                    handler.request.sendall(res.to_data())
+                    return
                 content = f'⭐ Starred <a href="https://github.com/{repo}">{repo}</a>'
 
             elif command == "createissue":
                 if len(args) < 2 or '/' not in args[0]:
-                    raise ValueError("Format: /createissue owner/repo Title")
+                    res = Response().set_status(400, "Bad Request").text("Unknown error")
+                    handler.request.sendall(res.to_data())
+                    return
                 repo = args[0]
                 title = ' '.join(args[1:])
                 response = requests.post(
@@ -126,12 +136,16 @@ def create_chat(request, handler):
                     json={"title": title, "body": ""}
                 )
                 if response.status_code != 201:
-                    raise ValueError(f"Error: {response.json().get('message', 'Unknown error')}")
+                    res = Response().set_status(400, "Bad Request").text("Unknown error")
+                    handler.request.sendall(res.to_data())
+                    return
                 issue_url = response.json()["html_url"]
                 content = f'📝 Created issue: <a href="{issue_url}">{title}</a>'
 
             else:
-                raise ValueError("Unknown command")
+                res = Response().set_status(400, "Bad Request").text("Unknown error")
+                handler.request.sendall(res.to_data())
+                return
 
         except Exception as e:
             res = Response().set_status(400, "Bad Request").text(str(e))
@@ -360,7 +374,8 @@ def update_nickname(request, handler):
 
 
 def register_user(request, handler):
-    username, password = extract_credentials(request)
+    username = extract_credentials(request)["username"]
+    password = extract_credentials(request)["password"]
 
     if not username or not password:
         res = Response().set_status(400, "Bad Request").text("Username and password are required.")
