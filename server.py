@@ -1,3 +1,5 @@
+import sys
+
 from pymongo import MongoClient
 import json
 import os
@@ -5,12 +7,15 @@ import socketserver
 import uuid
 import html
 import requests
+import pyotp
 from util.request import Request
 from util.response import Response
 from util.router import Router
 from util.hello_path import hello_path
 from util.auth import extract_credentials, validate_password, hash_password, verify_password, hash_token, \
-    generate_auth_token
+    generate_auth_token, decodeHelper
+from dotenv import load_dotenv
+load_dotenv()
 
 client = MongoClient("mongodb://localhost:27017/")
 db = client["server"]
@@ -62,9 +67,78 @@ def create_chat(request, handler):
     auth_token = request.cookies.get("auth_token")
     user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
     body = json.loads(request.body.decode())
-    content = html.escape(body.get("content", ""))
-
+    original_content = body.get("content", "")
+    content = original_content
     session_id = request.cookies.get("session")
+
+    if original_content.startswith('/'):
+        if not user or user.get("oauth_provider") != "github" or not user.get("github_access_token"):
+            res = Response().set_status(400, "Bad Request").text("Commands require GitHub OAuth login")
+            handler.request.sendall(res.to_data())
+            return
+
+        parts = original_content[1:].split()
+        if not parts:
+            res = Response().set_status(400, "Bad Request").text("Empty command")
+            handler.request.sendall(res.to_data())
+            return
+
+        command = parts[0].lower()
+        if command == "repos" or command == "star" or command == "createissue":
+            pass
+        else:
+            res = Response().set_status(400, "Bad Request").text("Unknown command")
+            handler.request.sendall(res.to_data())
+            return
+        args = parts[1:]
+        headers = {"Authorization": f"token {user['github_access_token']}"}
+
+        try:
+            if command == "repos":
+                if len(args) < 1:
+                    raise ValueError("Format: /repos username")
+                username = args[0]
+                response = requests.get(f"https://api.github.com/users/{username}/repos", headers=headers)
+                if response.status_code != 200:
+                    raise ValueError(f"Error: {response.json().get('message', 'Unknown error')}")
+
+                repos = response.json()[:50]
+                repo_links = [f'<a href="{repo["html_url"]}">{repo["name"]}</a>' for repo in repos]
+                content = "Repositories:<br>" + "<br>".join(repo_links)
+
+            elif command == "star":
+                if len(args) < 1 or '/' not in args[0]:
+                    raise ValueError("Format: /star owner/repo")
+                repo = args[0]
+                response = requests.put(f"https://api.github.com/user/starred/{repo}", headers=headers)
+                if response.status_code not in [204, 304]:
+                    raise ValueError(f"Error: {response.json().get('message', 'Unknown error')}")
+                content = f'⭐ Starred <a href="https://github.com/{repo}">{repo}</a>'
+
+            elif command == "createissue":
+                if len(args) < 2 or '/' not in args[0]:
+                    raise ValueError("Format: /createissue owner/repo Title")
+                repo = args[0]
+                title = ' '.join(args[1:])
+                response = requests.post(
+                    f"https://api.github.com/repos/{repo}/issues",
+                    headers=headers,
+                    json={"title": title, "body": ""}
+                )
+                if response.status_code != 201:
+                    raise ValueError(f"Error: {response.json().get('message', 'Unknown error')}")
+                issue_url = response.json()["html_url"]
+                content = f'📝 Created issue: <a href="{issue_url}">{title}</a>'
+
+            else:
+                raise ValueError("Unknown command")
+
+        except Exception as e:
+            res = Response().set_status(400, "Bad Request").text(str(e))
+            handler.request.sendall(res.to_data())
+            return
+    else:
+        content = html.escape(original_content)
 
     if user:
         user_id = user["user_id"]
@@ -126,6 +200,7 @@ def create_chat(request, handler):
 
     if "Cookie" not in request.headers:
         res.cookies({"session": session_id + ";HttpOnly;Path=/"})
+
     res.text("message sent")
     handler.request.sendall(res.to_data())
 
@@ -141,8 +216,19 @@ def update_chat(request, handler):
     chat_id = request.path.split("/")[-1]
     data = json.loads(request.body.decode())
     new_content = html.escape(data["content"])
-
     message = messages_collection.find_one({"id": chat_id})
+    session_id = request.cookies.get("session")
+    if session_id:
+        if session_id != message["session_id"]:
+            res = Response().set_status(403, "Forbidden").text("You can only update your own messages.")
+            handler.request.sendall(res.to_data())
+            return
+
+        messages_collection.update_one({"id": chat_id}, {"$set": {"content": new_content, "updated": True}})
+        res = Response().text("Message updated successfully.")
+        handler.request.sendall(res.to_data())
+        return
+
     if not message:
         res = Response().set_status(404, "Not Found").text("Message not found.")
         handler.request.sendall(res.to_data())
@@ -165,6 +251,19 @@ def delete_chat(request, handler):
     message = messages_collection.find_one({"id": chat_id})
     if not message:
         res = Response().set_status(404, "Not Found").text("Message not found.")
+        handler.request.sendall(res.to_data())
+        return
+
+    session_id = request.cookies.get("session")
+    if session_id:
+        if session_id != message["session_id"]:
+            res = Response().set_status(403, "Forbidden").text("You can only delete your own messages.")
+            res.cookies({"session": session_id})
+            handler.request.sendall(res.to_data())
+            return
+
+        messages_collection.delete_one({"id": chat_id})
+        res = Response().text("Message deleted successfully.")
         handler.request.sendall(res.to_data())
         return
 
@@ -294,7 +393,10 @@ def register_user(request, handler):
 
 
 def login_user(request, handler):
-    username, password = extract_credentials(request)
+    credentials = extract_credentials(request)
+    username = credentials["username"]
+    password = credentials["password"]
+    totp_code = credentials.get("totpCode", "")
 
     if not username or not password:
         res = Response().set_status(400, "Bad Request").text("Username and password are required.")
@@ -307,6 +409,18 @@ def login_user(request, handler):
         res = Response().set_status(400, "Unauthorized").text("Invalid username or password.")
         handler.request.sendall(res.to_data())
         return
+
+    if user.get("totp_secret"):
+        if not totp_code:
+            res = Response().set_status(401, "Unauthorized").text("TOTP code required for 2FA.")
+            handler.request.sendall(res.to_data())
+            return
+
+        totp = pyotp.TOTP(user["totp_secret"])
+        if not totp.verify(totp_code, valid_window=1):
+            res = Response().set_status(401, "Unauthorized").text("Invalid TOTP code.")
+            handler.request.sendall(res.to_data())
+            return
 
     auth_token = generate_auth_token()
     hashed_token = hash_token(auth_token)
@@ -351,7 +465,7 @@ def logout_user(request, handler):
             users_collection.update_one({"user_id": user["user_id"]}, {"$set": {"auth_token": None}})
 
     res = Response().set_status(302, "Found").headers({"Location": "/chat"})
-    res.cookies({"auth_token": "deleted;Max-Age=0;HttpOnly"})
+    res.cookies({"auth_token": "deleted;Max-Age=0;HttpOnly","oauth_state": "deleted;Max-Age=0;HttpOnly"})
     handler.request.sendall(res.to_data())
 
 
@@ -387,7 +501,6 @@ def search_users(request, handler):
 
     if not search_term:
         return
-
 
     users = list(users_collection.find({"username": {"$regex": f"^{search_term}"}}, {"_id": 0, "user_id": 1, "username": 1}))
     output = []
@@ -447,6 +560,140 @@ def update_profile(request, handler):
     res = Response().text("Profile updated successfully.")
     handler.request.sendall(res.to_data())
 
+def regenerate_2fa(request, handler):
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        res = Response().set_status(401, "Unauthorized").text("Unauthorized")
+        handler.request.sendall(res.to_data())
+        return
+
+    hashed_token = hash_token(auth_token)
+    user = users_collection.find_one({"auth_token": hashed_token})
+    if not user:
+        res = Response().set_status(401, "Unauthorized").text("Unauthorized")
+        handler.request.sendall(res.to_data())
+        return
+
+
+    new_secret = pyotp.random_base32()
+    users_collection.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"totp_secret": new_secret}}
+    )
+
+    res = Response().json({"secret": new_secret})
+    handler.request.sendall(res.to_data())
+
+
+def auth_github(request, handler):
+    state = generate_auth_token()
+    github_auth_url = (
+        f"https://github.com/login/oauth/authorize?"
+        f"client_id={os.getenv('GITHUB_CLIENT_ID')}&"
+        f"redirect_uri=http://localhost:8080/authcallback&"
+        f"scope=user:email,public_repo&"
+        f"state={state}"
+    )
+    res = Response()
+    res.set_status(302, "Found")
+    res.headers({"Location": github_auth_url})
+    res.cookies({"oauth_state": f"{state}; HttpOnly; Path=/"})
+    handler.request.sendall(res.to_data())
+
+
+def auth_callback(request, handler):
+    path = request.path
+    query_params = {}
+    if '?' in path:
+        _, query_str = path.split('?', 1)
+        for param in query_str.split('&'):
+            if '=' in param:
+                key, value = param.split('=', 1)
+                key = decodeHelper(key)
+                value = decodeHelper(value)
+                query_params[key] = value
+
+    code = query_params.get('code', '')
+    state = query_params.get('state', '')
+    stored_state = request.cookies.get('oauth_state', '')
+
+    if not code or state != stored_state:
+        res = Response().set_status(403, "Forbidden").text("Invalid request")
+        handler.request.sendall(res.to_data())
+        return
+
+    token_data = {
+        'client_id': os.getenv('GITHUB_CLIENT_ID'),
+        'client_secret': os.getenv('GITHUB_CLIENT_SECRET'),
+        'code': code,
+        'redirect_uri': 'http://localhost:8080/authcallback'
+    }
+    headers = {'Accept': 'application/json'}
+    token_res = requests.post('https://github.com/login/oauth/access_token', data=token_data, headers=headers)
+    if token_res.status_code != 200:
+        res = Response().set_status(400, "Bad Request").text("OAuth failed")
+        handler.request.sendall(res.to_data())
+        return
+    access_token = token_res.json().get('access_token')
+
+    user_res = requests.get('https://api.github.com/user', headers={'Authorization': f'token {access_token}'})
+    if user_res.status_code != 200:
+        res = Response().set_status(400, "Bad Request").text("Failed to fetch user data")
+        handler.request.sendall(res.to_data())
+        return
+    user_data = user_res.json()
+    username = user_data.get('login')
+    email = user_data.get('email')
+
+    if not username:
+        email_res = requests.get('https://api.github.com/user/emails',
+                                 headers={'Authorization': f'token {access_token}'})
+        if email_res.status_code == 200:
+            emails = email_res.json()
+            primary_email = next((e['email'] for e in emails if e.get('primary')), None)
+            username = primary_email.split('@')[0] if primary_email else None
+
+    if not username:
+        res = Response().set_status(400, "Bad Request").text("Username not found")
+        handler.request.sendall(res.to_data())
+        return
+
+    user = users_collection.find_one({"username": username})
+    if not user:
+        user_id = str(uuid.uuid4())
+        hashed_pw = hash_password(generate_auth_token())
+        auth_token = generate_auth_token()
+        hashed_token = hash_token(auth_token)
+        users_collection.insert_one({
+            "user_id": user_id,
+            "username": username,
+            "password": hashed_pw,
+            "auth_token": hashed_token,
+            "oauth_provider": "github",
+            "github_access_token": access_token
+        })
+    else:
+        auth_token = generate_auth_token()
+        hashed_token = hash_token(auth_token)
+        users_collection.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": {
+                "auth_token": hashed_token,
+                "oauth_provider": "github",
+                "github_access_token": access_token
+            }}
+        )
+
+    res = Response()
+    res.set_status(302, "Found")
+    res.headers({"Location": "/chat"})
+    res.cookies({
+        "auth_token": f"{auth_token}; Max-Age=3600; HttpOnly; Path=/",
+        "session": "deleted; Max-Age=0; HttpOnly"
+    })
+    handler.request.sendall(res.to_data())
+
+
 class MyTCPHandler(socketserver.BaseRequestHandler):
 
     def __init__(self, request, client_address, server):
@@ -473,6 +720,9 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("GET", "/search-users", lambda req, hnd: render(req, hnd, "search-users.html"), True)
         self.router.add_route("GET", "/api/users/search", search_users, False)
         self.router.add_route("POST", "/api/users/settings", update_profile, False)
+        self.router.add_route("POST", "/api/totp/enable", regenerate_2fa, False)
+        self.router.add_route("GET", "/authgithub", auth_github, True)
+        self.router.add_route("GET", "/authcallback", auth_callback, False)
         super().__init__(request, client_address, server)
 
 
