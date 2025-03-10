@@ -21,10 +21,7 @@ def extract_credentials(request):
             "totpCode": credentials.get("totpCode", "")
         }
 
-    return {
-        "username": credentials.get("username", ""),
-        "password": credentials.get("password", "")
-    }
+    return [credentials.get("username", ""), credentials.get("password", "")]
 
 def decodeHelper(encoded_str):
     decoded_str = ""

@@ -374,8 +374,7 @@ def update_nickname(request, handler):
 
 
 def register_user(request, handler):
-    username = extract_credentials(request)["username"]
-    password = extract_credentials(request)["password"]
+    username,password = extract_credentials(request)
 
     if not username or not password:
         res = Response().set_status(400, "Bad Request").text("Username and password are required.")
@@ -409,9 +408,31 @@ def register_user(request, handler):
 
 def login_user(request, handler):
     credentials = extract_credentials(request)
-    username = credentials["username"]
-    password = credentials["password"]
-    totp_code = credentials.get("totpCode", "")
+    if len(credentials) > 2:
+        username = credentials["username"]
+        password = credentials["password"]
+        totp_code = credentials.get("totpCode", "")
+
+        user = users_collection.find_one({"username": username})
+
+        if not user or not verify_password(user["password"], password):
+            res = Response().set_status(400, "Unauthorized").text("Invalid username or password.")
+            handler.request.sendall(res.to_data())
+            return
+
+        if user.get("totp_secret"):
+            if not totp_code:
+                res = Response().set_status(401, "Unauthorized").text("TOTP code required for 2FA.")
+                handler.request.sendall(res.to_data())
+                return
+
+            totp = pyotp.TOTP(user["totp_secret"])
+            if not totp.verify(totp_code, valid_window=1):
+                res = Response().set_status(401, "Unauthorized").text("Invalid TOTP code.")
+                handler.request.sendall(res.to_data())
+                return
+    else:
+        username, password = extract_credentials(request)
 
     if not username or not password:
         res = Response().set_status(400, "Bad Request").text("Username and password are required.")
@@ -424,18 +445,6 @@ def login_user(request, handler):
         res = Response().set_status(400, "Unauthorized").text("Invalid username or password.")
         handler.request.sendall(res.to_data())
         return
-
-    if user.get("totp_secret"):
-        if not totp_code:
-            res = Response().set_status(401, "Unauthorized").text("TOTP code required for 2FA.")
-            handler.request.sendall(res.to_data())
-            return
-
-        totp = pyotp.TOTP(user["totp_secret"])
-        if not totp.verify(totp_code, valid_window=1):
-            res = Response().set_status(401, "Unauthorized").text("Invalid TOTP code.")
-            handler.request.sendall(res.to_data())
-            return
 
     auth_token = generate_auth_token()
     hashed_token = hash_token(auth_token)
@@ -542,8 +551,8 @@ def update_profile(request, handler):
         handler.request.sendall(res.to_data())
         return
 
-    username = extract_credentials(request)["username"]
-    password = extract_credentials(request)["password"]
+    username,password = extract_credentials(request)
+
     if not username:
         hashed_password = hash_password(password)
         users_collection.update_one(
