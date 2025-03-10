@@ -13,12 +13,6 @@ def extract_credentials(request):
         key = key.strip()
         value = decodeHelper(value.strip())
         credentials[key] = value
-        if credentials.get("totpCode",""):
-            return {
-                "username": credentials.get("username", ""),
-                "password": credentials.get("password", ""),
-                "totpCode": credentials.get("totpCode", "")
-            }
 
     return {
         "username": credentials.get("username", ""),

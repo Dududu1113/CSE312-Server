@@ -542,7 +542,8 @@ def update_profile(request, handler):
         handler.request.sendall(res.to_data())
         return
 
-    username, password = extract_credentials(request)
+    username = extract_credentials(request)["username"]
+    password = extract_credentials(request)["password"]
     if not username:
         hashed_password = hash_password(password)
         users_collection.update_one(
