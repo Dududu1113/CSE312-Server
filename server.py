@@ -121,7 +121,7 @@ def create_chat(request, handler):
                     res = Response().set_status(400, "Bad Request").text("Unknown error")
                     handler.request.sendall(res.to_data())
                     return
-                content = f'⭐ Starred <a href="https://github.com/{repo}">{repo}</a>'
+                content = f'⭐ Starred <a href="https://github.com/{repo}">{repo} click text to view</a>'
 
             elif command == "createissue":
                 if len(args) < 2 or '/' not in args[0]:
@@ -140,7 +140,7 @@ def create_chat(request, handler):
                     handler.request.sendall(res.to_data())
                     return
                 issue_url = response.json()["html_url"]
-                content = f'📝 Created issue: <a href="{issue_url}">{title}</a>'
+                content = f'📝 Created issue: <a href="{issue_url}">{title} click text to view</a>'
 
             else:
                 res = Response().set_status(400, "Bad Request").text("Unknown error")
