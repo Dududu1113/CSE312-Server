@@ -68,7 +68,6 @@ def create_chat(request, handler):
     user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
     body = json.loads(request.body.decode())
     original_content = body.get("content", "")
-    content = original_content
     session_id = request.cookies.get("session")
 
     if original_content.startswith('/'):
@@ -374,7 +373,12 @@ def update_nickname(request, handler):
 
 
 def register_user(request, handler):
-    username,password = extract_credentials(request)
+    credentials = extract_credentials(request)
+    if len(credentials) > 2:
+        username = credentials["username"]
+        password = credentials["password"]
+    else:
+        username,password = extract_credentials(request)
 
     if not username or not password:
         res = Response().set_status(400, "Bad Request").text("Username and password are required.")
@@ -551,7 +555,12 @@ def update_profile(request, handler):
         handler.request.sendall(res.to_data())
         return
 
-    username,password = extract_credentials(request)
+    credentials = extract_credentials(request)
+    if len(credentials) > 2:
+        username = credentials["username"]
+        password = credentials["password"]
+    else:
+        username, password = extract_credentials(request)
 
     if not username:
         hashed_password = hash_password(password)
