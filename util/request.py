@@ -13,7 +13,7 @@ class Request:
         self.headers = {}
         self.cookies = {}
 
-        urlsplit = request.split(b"\r\n\r\n")
+        urlsplit = request.split(b"\r\n\r\n",1)
         #print (len(urlsplit))
         if len(urlsplit) > 1:
             self.body = urlsplit[1]

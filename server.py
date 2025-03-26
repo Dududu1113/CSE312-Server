@@ -753,89 +753,90 @@ def auth_callback(request, handler):
     })
     handler.request.sendall(res.to_data())
 
+
 def handle_avatar_upload(request, handler):
-    global content_disp
+    res = Response()
     auth_token = request.cookies.get("auth_token")
+
+    # 验证用户登录状态
     if not auth_token:
-        res = Response().set_status(401, "Unauthorized").text("Unauthorized")
+        res.set_status(401, "Unauthorized").text("请先登录")
         handler.request.sendall(res.to_data())
         return
 
     hashed_token = hash_token(auth_token)
     user = users_collection.find_one({"auth_token": hashed_token})
     if not user:
-        res = Response().set_status(401, "Unauthorized").text("Unauthorized")
+        res.set_status(401, "Unauthorized").text("无效的认证令牌")
         handler.request.sendall(res.to_data())
         return
 
+    # 解析multipart请求
     try:
         multipart_data = parse_multipart(request)
-        print(multipart_data.boundary)
-        print(multipart_data.parts)
-    except ValueError as e:
-        res = Response().set_status(400, "Bad Request1").text(str(e))
+    except ValueError:
+        res.set_status(400, "Bad Request").text("无效的请求格式")
         handler.request.sendall(res.to_data())
         return
 
+    # 查找上传的文件
     uploaded_file = None
     for part in multipart_data.parts:
-        content_disp = part.headers.get('Content-Disposition', '')
-        print(f"Part headers: {part.headers}")  # Debug logging
-        print(f"Content-Disposition: {content_disp}")  # Debug logging
-        if 'filename' in content_disp:
+        if part.name == "avatar" and part.filename:
             uploaded_file = part
             break
 
     if not uploaded_file:
-        res = Response().set_status(400, "Bad Request2").text("No file uploaded")
+        res.set_status(400, "Bad Request").text("未找到上传文件")
         handler.request.sendall(res.to_data())
         return
 
-    filename = None
-    for param in content_disp.split(';'):
-        param = param.strip()
-        if param.startswith('name='):
-            field_name = param.split('=', 1)[1].strip('"')
-            if field_name == "avatar":  # Match your form's input name
-                uploaded_file = part
-                break
-
-    if not filename:
-        res = Response().set_status(400, "Bad Request3").text("Invalid filename")
-        handler.request.sendall(res.to_data())
-        return
-
-    allowed_extensions = {'jpg', 'jpeg', 'png', 'gif'}
-    file_ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    # 验证文件类型
+    allowed_extensions = {".jpg", ".jpeg", ".png", ".gif"}
+    file_ext = os.path.splitext(uploaded_file.filename.lower())[1]
     if file_ext not in allowed_extensions:
-        res = Response().set_status(400, "Bad Request4").text("Invalid file type")
+        res.set_status(400, "Bad Request").text("仅支持JPG/PNG/GIF格式")
         handler.request.sendall(res.to_data())
         return
 
-    new_filename = f"{uuid.uuid4()}.{file_ext}"
-    save_dir = "public/imgs/profile-pics"
-    os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, new_filename)
+    # 生成唯一文件名
+    file_uuid = str(uuid.uuid4())
+    new_filename = f"{file_uuid}{file_ext}"
+    save_path = os.path.join("public/imgs/profile-pics", new_filename)
+    image_url = f"/public/imgs/profile-pics/{new_filename}"
 
-    old_image = user.get("imageURL")
-    if old_image:
-        old_path = old_image.lstrip('/')
+    # 删除旧头像（如果存在）
+    if user.get("imageURL"):
+        old_path = user["imageURL"].lstrip("/")
         if os.path.exists(old_path):
             try:
                 os.remove(old_path)
-            except OSError as e:
-                print(f"Error deleting old image: {e}")
+            except Exception as e:
+                print(f"删除旧头像失败: {e}")
 
-    with open(save_path, 'wb') as f:
-        f.write(uploaded_file.content)
+    # 保存新文件
+    try:
+        os.makedirs("public/imgs/profile-pics", exist_ok=True)
+        with open(save_path, "wb") as f:
+            f.write(uploaded_file.content)
+    except Exception as e:
+        res.set_status(500, "Internal Error").text("文件保存失败")
+        handler.request.sendall(res.to_data())
+        return
 
-    image_url = f"/public/imgs/profile-pics/{new_filename}"
+    # 更新数据库
     users_collection.update_one(
         {"user_id": user["user_id"]},
         {"$set": {"imageURL": image_url}}
     )
 
-    res = Response().text("Avatar updated successfully")
+    # 更新消息中的头像
+    messages_collection.update_many(
+        {"user_id": user["user_id"]},
+        {"$set": {"imageURL": image_url}}
+    )
+
+    res.set_status(200, "OK").text("头像更新成功")
     handler.request.sendall(res.to_data())
 
 
@@ -880,22 +881,34 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
     def handle(self):
         buffer = b''
         headers_end = -1
+
+        # Step 1: 接收数据直到找到头部结束标记 \r\n\r\n
         while headers_end == -1:
-            data = self.request.recv(2048)
+            data = self.request.recv(4096)
             if not data:
                 break
             buffer += data
-            headers_end = buffer.find(b'\r\n\r\n')
+            headers_end = buffer.find(b'\r\n\r\n')  # 定位第一个 \r\n\r\n 的位置
 
+        # 如果未找到合法头部，返回错误
         if headers_end == -1:
+            res = Response().set_status(400, "Bad Request").text("Invalid headers")
+            self.request.sendall(res.to_data())
             return
 
-        headers_part = buffer[:headers_end]
-        body_part = buffer[headers_end + 4:]
+        # Step 2: 正确分割头部和体部
+        headers_part = buffer[:headers_end]  # 头部（不包含 \r\n\r\n）
+        body_start = headers_end + 4  # 体部起始位置（跳过 \r\n\r\n）
+        body_part = buffer[body_start:] if body_start < len(buffer) else b''
 
-        temp_request = Request(headers_part + b'\r\n\r\n' + body_part)
-        content_length = int(temp_request.headers.get('Content-Length', 0))
+        # Step 3: 解析 Content-Length
+        try:
+            temp_request = Request(headers_part + b'\r\n\r\n' + body_part)  # 临时重建请求
+            content_length = int(temp_request.headers.get('Content-Length', 0))
+        except (KeyError, ValueError):
+            content_length = 0
 
+        # Step 4: 接收剩余体部数据（不包含额外的分隔符）
         remaining = content_length - len(body_part)
         while remaining > 0:
             data = self.request.recv(min(4096, remaining))
@@ -904,9 +917,11 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             body_part += data
             remaining -= len(data)
 
+        # Step 5: 构建最终请求（确保仅有一个 \r\n\r\n）
         full_request = Request(headers_part + b'\r\n\r\n' + body_part)
         print("--- received data ---")
         print(headers_part + b'\r\n\r\n' + body_part)
+        print(body_part)
         print("--- end of data ---\n\n")
         self.router.route_request(full_request, self)
 
