@@ -8,6 +8,8 @@ import uuid
 import html
 import requests
 import pyotp
+
+from util.multipart import parse_multipart
 from util.request import Request
 from util.response import Response
 from util.router import Router
@@ -155,19 +157,41 @@ def create_chat(request, handler):
 
     if user:
         user_id = user["user_id"]
-        existing_message = messages_collection.find_one({"user_id": user_id})
         author = user["username"]
-        if existing_message:
-            imageURL = existing_message.get("imageURL")
-        else:
-            response = requests.get(f"https://api.dicebear.com/9.x/croodles-neutral/svg?seed={auth_token}")
-            if response.status_code == 200:
-                profile_pic_dir = "public/imgs/profile-pics"
-                os.makedirs(profile_pic_dir, exist_ok=True)
-                profile_pic_path = f"{profile_pic_dir}/{auth_token}.svg"
-                with open(profile_pic_path, "wb") as f:
-                    f.write(response.content)
-                imageURL = f"/public/imgs/profile-pics/{auth_token}.svg"
+        imageURL = user.get("imageURL")
+        if not imageURL:
+            existing_message = messages_collection.find_one({"user_id": user_id})
+            if existing_message:
+                imageURL = existing_message.get("imageURL")
+            else:
+                response = requests.get(f"https://api.dicebear.com/9.x/croodles-neutral/svg?seed={auth_token}")
+                if response.status_code == 200:
+                    save_dir = "public/imgs/profile-pics"
+                    os.makedirs(save_dir, exist_ok=True)
+                    filename = f"{auth_token}.svg"
+                    save_path = os.path.join(save_dir, filename)
+                    with open(save_path, 'wb') as f:
+                        f.write(response.content)
+                    imageURL = f"/public/imgs/profile-pics/{filename}"
+                    users_collection.update_one(
+                        {"user_id": user_id},
+                        {"$set": {"imageURL": imageURL}}
+                    )
+    # if user:
+    #     user_id = user["user_id"]
+    #     existing_message = messages_collection.find_one({"user_id": user_id})
+    #     author = user["username"]
+    #     if existing_message:
+    #         imageURL = existing_message.get("imageURL")
+    #     else:
+    #         response = requests.get(f"https://api.dicebear.com/9.x/croodles-neutral/svg?seed={auth_token}")
+    #         if response.status_code == 200:
+    #             profile_pic_dir = "public/imgs/profile-pics"
+    #             os.makedirs(profile_pic_dir, exist_ok=True)
+    #             profile_pic_path = f"{profile_pic_dir}/{auth_token}.svg"
+    #             with open(profile_pic_path, "wb") as f:
+    #                 f.write(response.content)
+    #             imageURL = f"/public/imgs/profile-pics/{auth_token}.svg"
     else:
         if not session_id:
             session_id = str(uuid.uuid4())
@@ -500,21 +524,23 @@ def logout_user(request, handler):
 
 def get_user_profile(request, handler):
     auth_token = request.cookies.get("auth_token")
-
     if not auth_token:
-        res = Response().set_status(401, "Unauthorized").json({"username": '', "id": ''})
+        res = Response().set_status(401, "Unauthorized").json({"username": '', "id": '', "imageURL": ''})
         handler.request.sendall(res.to_data())
         return
 
     hashed_token = hash_token(auth_token)
     user = users_collection.find_one({"auth_token": hashed_token})
-
     if not user:
-        res = Response().set_status(401, "Unauthorized").json({"username": '', "id": ''})
+        res = Response().set_status(401, "Unauthorized").json({"username": '', "id": '', "imageURL": ''})
         handler.request.sendall(res.to_data())
         return
 
-    res = Response().json({"username": user["username"], "id": user["user_id"]})
+    res = Response().json({
+        "username": user["username"],
+        "id": user["user_id"],
+        "imageURL": user.get("imageURL", "")
+    })
     handler.request.sendall(res.to_data())
 
 def search_users(request, handler):
@@ -727,6 +753,91 @@ def auth_callback(request, handler):
     })
     handler.request.sendall(res.to_data())
 
+def handle_avatar_upload(request, handler):
+    global content_disp
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        res = Response().set_status(401, "Unauthorized").text("Unauthorized")
+        handler.request.sendall(res.to_data())
+        return
+
+    hashed_token = hash_token(auth_token)
+    user = users_collection.find_one({"auth_token": hashed_token})
+    if not user:
+        res = Response().set_status(401, "Unauthorized").text("Unauthorized")
+        handler.request.sendall(res.to_data())
+        return
+
+    try:
+        multipart_data = parse_multipart(request)
+        print(multipart_data.boundary)
+        print(multipart_data.parts)
+    except ValueError as e:
+        res = Response().set_status(400, "Bad Request1").text(str(e))
+        handler.request.sendall(res.to_data())
+        return
+
+    uploaded_file = None
+    for part in multipart_data.parts:
+        content_disp = part.headers.get('Content-Disposition', '')
+        print(f"Part headers: {part.headers}")  # Debug logging
+        print(f"Content-Disposition: {content_disp}")  # Debug logging
+        if 'filename' in content_disp:
+            uploaded_file = part
+            break
+
+    if not uploaded_file:
+        res = Response().set_status(400, "Bad Request2").text("No file uploaded")
+        handler.request.sendall(res.to_data())
+        return
+
+    filename = None
+    for param in content_disp.split(';'):
+        param = param.strip()
+        if param.startswith('name='):
+            field_name = param.split('=', 1)[1].strip('"')
+            if field_name == "avatar":  # Match your form's input name
+                uploaded_file = part
+                break
+
+    if not filename:
+        res = Response().set_status(400, "Bad Request3").text("Invalid filename")
+        handler.request.sendall(res.to_data())
+        return
+
+    allowed_extensions = {'jpg', 'jpeg', 'png', 'gif'}
+    file_ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    if file_ext not in allowed_extensions:
+        res = Response().set_status(400, "Bad Request4").text("Invalid file type")
+        handler.request.sendall(res.to_data())
+        return
+
+    new_filename = f"{uuid.uuid4()}.{file_ext}"
+    save_dir = "public/imgs/profile-pics"
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, new_filename)
+
+    old_image = user.get("imageURL")
+    if old_image:
+        old_path = old_image.lstrip('/')
+        if os.path.exists(old_path):
+            try:
+                os.remove(old_path)
+            except OSError as e:
+                print(f"Error deleting old image: {e}")
+
+    with open(save_path, 'wb') as f:
+        f.write(uploaded_file.content)
+
+    image_url = f"/public/imgs/profile-pics/{new_filename}"
+    users_collection.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"imageURL": image_url}}
+    )
+
+    res = Response().text("Avatar updated successfully")
+    handler.request.sendall(res.to_data())
+
 
 class MyTCPHandler(socketserver.BaseRequestHandler):
 
@@ -757,27 +868,64 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("POST", "/api/totp/enable", regenerate_2fa, False)
         self.router.add_route("GET", "/authgithub", auth_github, True)
         self.router.add_route("GET", "/authcallback", auth_callback, False)
+        self.router.add_route("GET", "/change-avatar", lambda req, hnd: render(req, hnd, "change-avatar.html"), True)
+        self.router.add_route("GET", "/videotube", lambda req, hnd: render(req, hnd, "videotube.html"), True)
+        self.router.add_route("GET", "/videotube/upload", lambda req, hnd: render(req, hnd, "upload.html"), True)
+        self.router.add_route("GET", "/videotube/videos/{videoID}", lambda req, hnd: render(req, hnd, "view-video.html"), True)
+        self.router.add_route("POST", "/api/users/avatar", handle_avatar_upload, False)
         super().__init__(request, client_address, server)
 
 
 
     def handle(self):
-        received_data = self.request.recv(2048)
-        print(self.client_address)
-        print("--- received data ---")
-        print(received_data)
-        print("--- end of data ---\n\n")
-        request = Request(received_data)
+        buffer = b''
+        headers_end = -1
+        while headers_end == -1:
+            data = self.request.recv(2048)
+            if not data:
+                break
+            buffer += data
+            headers_end = buffer.find(b'\r\n\r\n')
 
-        self.router.route_request(request, self)
+        if headers_end == -1:
+            return
+
+        headers_part = buffer[:headers_end]
+        body_part = buffer[headers_end + 4:]
+
+        temp_request = Request(headers_part + b'\r\n\r\n' + body_part)
+        content_length = int(temp_request.headers.get('Content-Length', 0))
+
+        remaining = content_length - len(body_part)
+        while remaining > 0:
+            data = self.request.recv(min(4096, remaining))
+            if not data:
+                break
+            body_part += data
+            remaining -= len(data)
+
+        full_request = Request(headers_part + b'\r\n\r\n' + body_part)
+        print("--- received data ---")
+        print(headers_part + b'\r\n\r\n' + body_part)
+        print("--- end of data ---\n\n")
+        self.router.route_request(full_request, self)
+
+        # received_data = self.request.recv(2048)
+        # print(self.client_address)
+        # print("--- received data ---")
+        # print(received_data)
+        # print("--- end of data ---\n\n")
+        # request = Request(received_data)
+        #
+        # self.router.route_request(request, self)
 
 
 def main():
     host = "0.0.0.0"
     port = 8080
-    socketserver.TCPServer.allow_reuse_address = True
+    socketserver.ThreadingTCPServer.allow_reuse_address = True
 
-    server = socketserver.TCPServer((host, port), MyTCPHandler)
+    server = socketserver.ThreadingTCPServer((host, port), MyTCPHandler)
 
     print("Listening on port " + str(port))
     server.serve_forever()
