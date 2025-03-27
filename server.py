@@ -919,10 +919,10 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
 
         # Step 5: 构建最终请求（确保仅有一个 \r\n\r\n）
         full_request = Request(headers_part + b'\r\n\r\n' + body_part)
-        print("--- received data ---")
-        print(headers_part + b'\r\n\r\n' + body_part)
-        print(body_part)
-        print("--- end of data ---\n\n")
+        # print("--- received data ---")
+        # print(headers_part + b'\r\n\r\n' + body_part)
+        # print(body_part)
+        # print("--- end of data ---\n\n")
         self.router.route_request(full_request, self)
 
         # received_data = self.request.recv(2048)
