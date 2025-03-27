@@ -41,7 +41,7 @@ def parse_multipart(request):
 
         # 分离头部和内容
         headers_block = part[:headers_end]
-        content = part[headers_end + 4 :]  # 跳过 \r\n\r\n
+        content = part[headers_end + 4 :].rstrip(b"\r\n--")  # 跳过 \r\n\r\n
 
         # 解析头部
         headers = {}
