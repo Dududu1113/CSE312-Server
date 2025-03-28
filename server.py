@@ -1,6 +1,7 @@
 import sys
 
 from pymongo import MongoClient
+from datetime import datetime
 import json
 import os
 import socketserver
@@ -23,9 +24,10 @@ client = MongoClient("mongodb://localhost:27017/")
 db = client["server"]
 messages_collection = db["CSE312"]
 users_collection = db["users"]
+videos_collection = db["videos"]
 
 def publicfile(request, handler):
-    mineType = {".html": "text/html",".css": "text/css",".js": "text/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".webp": "image/webp",".png": "image/png",".json": "application/json",".svg":"image/svg+xml"}
+    mineType = {".html": "text/html",".css": "text/css",".js": "text/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".webp": "image/webp",".png": "image/png",".json": "application/json",".svg":"image/svg+xml",".mp4": "video/mp4"}
     path = request.path.replace("/","",1)
 
     if os.path.exists(path):
@@ -758,28 +760,24 @@ def handle_avatar_upload(request, handler):
     res = Response()
     auth_token = request.cookies.get("auth_token")
 
-    # 验证用户登录状态
     if not auth_token:
-        res.set_status(401, "Unauthorized").text("请先登录")
+        res.set_status(401, "Unauthorized").text("login requesed")
         handler.request.sendall(res.to_data())
         return
 
     hashed_token = hash_token(auth_token)
     user = users_collection.find_one({"auth_token": hashed_token})
     if not user:
-        res.set_status(401, "Unauthorized").text("无效的认证令牌")
+        res.set_status(401, "Unauthorized").text("Invalid auth token")
         handler.request.sendall(res.to_data())
         return
-
-    # 解析multipart请求
     try:
         multipart_data = parse_multipart(request)
     except ValueError:
-        res.set_status(400, "Bad Request").text("无效的请求格式")
+        res.set_status(400, "Bad Request").text("Invalid request")
         handler.request.sendall(res.to_data())
         return
 
-    # 查找上传的文件
     uploaded_file = None
     for part in multipart_data.parts:
         if part.name == "avatar" and part.filename:
@@ -787,56 +785,131 @@ def handle_avatar_upload(request, handler):
             break
 
     if not uploaded_file:
-        res.set_status(400, "Bad Request").text("未找到上传文件")
+        res.set_status(400, "Bad Request").text("not found avatar")
         handler.request.sendall(res.to_data())
         return
 
-    # 验证文件类型
     allowed_extensions = {".jpg", ".jpeg", ".png", ".gif"}
     file_ext = os.path.splitext(uploaded_file.filename.lower())[1]
     if file_ext not in allowed_extensions:
-        res.set_status(400, "Bad Request").text("仅支持JPG/PNG/GIF格式")
+        res.set_status(400, "Bad Request").text("JPG/PNG/GIF only")
         handler.request.sendall(res.to_data())
         return
 
-    # 生成唯一文件名
     file_uuid = str(uuid.uuid4())
     new_filename = f"{file_uuid}{file_ext}"
     save_path = os.path.join("public/imgs/profile-pics", new_filename)
     image_url = f"/public/imgs/profile-pics/{new_filename}"
 
-    # 删除旧头像（如果存在）
     if user.get("imageURL"):
         old_path = user["imageURL"].lstrip("/")
         if os.path.exists(old_path):
             try:
                 os.remove(old_path)
             except Exception as e:
-                print(f"删除旧头像失败: {e}")
+                print(f"fail to delete old profile: {e}")
 
-    # 保存新文件
     try:
         os.makedirs("public/imgs/profile-pics", exist_ok=True)
         with open(save_path, "wb") as f:
             f.write(uploaded_file.content)
     except Exception as e:
-        res.set_status(500, "Internal Error").text("文件保存失败")
+        res.set_status(500, "Internal Error").text("failed to save profile")
         handler.request.sendall(res.to_data())
         return
 
-    # 更新数据库
     users_collection.update_one(
         {"user_id": user["user_id"]},
         {"$set": {"imageURL": image_url}}
     )
 
-    # 更新消息中的头像
     messages_collection.update_many(
         {"user_id": user["user_id"]},
         {"$set": {"imageURL": image_url}}
     )
 
-    res.set_status(200, "OK").text("头像更新成功")
+    res.set_status(200, "OK").text("updated profile")
+    handler.request.sendall(res.to_data())
+
+
+def handle_video_upload(request, handler):
+    res = Response()
+    try:
+        auth_token = request.cookies.get("auth_token")
+        if not auth_token:
+            res.set_status(401, "Unauthorized").text("login requesed")
+            handler.request.sendall(res.to_data())
+            return
+
+        hashed_token = hash_token(auth_token)
+        user = users_collection.find_one({"auth_token": hashed_token})
+        if not user:
+            res.set_status(401, "Unauthorized").text("Invalid auth token")
+            handler.request.sendall(res.to_data())
+            return
+
+        multipart_data = parse_multipart(request)
+
+        title_part = next((p for p in multipart_data.parts if p.name == "title"), None)
+        description_part = next((p for p in multipart_data.parts if p.name == "description"), None)
+        video_part = next((p for p in multipart_data.parts if p.name == "video" and p.filename), None)
+
+        if not all([title_part, video_part]):
+            res.set_status(400, "Bad Request1").text("Invalid request")
+            handler.request.sendall(res.to_data())
+            return
+
+        if not video_part.filename.lower().endswith(".mp4"):
+            res.set_status(400, "Bad Request2").text("mp4 only")
+            handler.request.sendall(res.to_data())
+            return
+
+        video_id = str(uuid.uuid4())
+        file_ext = os.path.splitext(video_part.filename)[1]
+        filename = f"{video_id}{file_ext}"
+        save_path = os.path.join("public/videos", filename)
+        os.makedirs("public/videos", exist_ok=True)
+
+        with open(save_path, "wb") as f:
+            f.write(video_part.content)
+
+        video_data = {
+            "author_id": user["user_id"],
+            "title": title_part.content.decode("utf-8"),
+            "description": description_part.content.decode("utf-8") if description_part else "",
+            "video_path": f"public/videos/{filename}",
+            "created_at": datetime.now().isoformat(),
+            "id": video_id
+        }
+        videos_collection.insert_one(video_data)
+
+        res.set_status(200, "OK").json({"id": video_id})
+
+    except Exception as e:
+        res.set_status(500, "Internal Error").text(str(e))
+
+    handler.request.sendall(res.to_data())
+
+
+def get_all_videos(request, handler):
+    videos = list(videos_collection.find({}, {"_id": 0}))
+    res = Response().json({"videos": videos})
+    handler.request.sendall(res.to_data())
+
+
+def get_single_video(request, handler):
+    video_id = request.path.split("/")[-1]
+    print(video_id)
+    video = videos_collection.find_one({"id": video_id}, {"_id": 0})
+    if not video:
+        res = Response().set_status(404, "Not Found").text("视频未找到")
+    else:
+        res = Response().json({"video": video})
+
+    handler.request.sendall(res.to_data())
+
+def get_transcriptions(request, handler):
+    res = Response().set_status(200, "un")
     handler.request.sendall(res.to_data())
 
 
@@ -872,8 +945,12 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("GET", "/change-avatar", lambda req, hnd: render(req, hnd, "change-avatar.html"), True)
         self.router.add_route("GET", "/videotube", lambda req, hnd: render(req, hnd, "videotube.html"), True)
         self.router.add_route("GET", "/videotube/upload", lambda req, hnd: render(req, hnd, "upload.html"), True)
-        self.router.add_route("GET", "/videotube/videos/{videoID}", lambda req, hnd: render(req, hnd, "view-video.html"), True)
+        self.router.add_route("GET", "/videotube/videos/", lambda req, hnd: render(req, hnd, "view-video.html"), False)
         self.router.add_route("POST", "/api/users/avatar", handle_avatar_upload, False)
+        self.router.add_route("POST", "/api/videos", handle_video_upload, False)
+        self.router.add_route("GET", "/api/videos", get_all_videos, True)
+        self.router.add_route("GET", "/api/videos/", get_single_video, False)
+        #self.router.add_route("GET", "/api/transcriptions/", get_transcriptions, False)
         super().__init__(request, client_address, server)
 
 
@@ -881,34 +958,28 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
     def handle(self):
         buffer = b''
         headers_end = -1
-
-        # Step 1: 接收数据直到找到头部结束标记 \r\n\r\n
         while headers_end == -1:
             data = self.request.recv(4096)
             if not data:
                 break
             buffer += data
-            headers_end = buffer.find(b'\r\n\r\n')  # 定位第一个 \r\n\r\n 的位置
+            headers_end = buffer.find(b'\r\n\r\n')
 
-        # 如果未找到合法头部，返回错误
         if headers_end == -1:
             res = Response().set_status(400, "Bad Request").text("Invalid headers")
             self.request.sendall(res.to_data())
             return
 
-        # Step 2: 正确分割头部和体部
-        headers_part = buffer[:headers_end]  # 头部（不包含 \r\n\r\n）
-        body_start = headers_end + 4  # 体部起始位置（跳过 \r\n\r\n）
+        headers_part = buffer[:headers_end]
+        body_start = headers_end + 4
         body_part = buffer[body_start:] if body_start < len(buffer) else b''
 
-        # Step 3: 解析 Content-Length
         try:
-            temp_request = Request(headers_part + b'\r\n\r\n' + body_part)  # 临时重建请求
+            temp_request = Request(headers_part + b'\r\n\r\n' + body_part)
             content_length = int(temp_request.headers.get('Content-Length', 0))
         except (KeyError, ValueError):
             content_length = 0
 
-        # Step 4: 接收剩余体部数据（不包含额外的分隔符）
         remaining = content_length - len(body_part)
         while remaining > 0:
             data = self.request.recv(min(4096, remaining))
@@ -917,7 +988,6 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             body_part += data
             remaining -= len(data)
 
-        # Step 5: 构建最终请求（确保仅有一个 \r\n\r\n）
         full_request = Request(headers_part + b'\r\n\r\n' + body_part)
         # print("--- received data ---")
         # print(headers_part + b'\r\n\r\n' + body_part)
