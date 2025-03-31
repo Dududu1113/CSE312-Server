@@ -9,6 +9,7 @@ import uuid
 import html
 import requests
 import pyotp
+import subprocess
 
 from util.multipart import parse_multipart
 from util.request import Request
@@ -20,6 +21,8 @@ from util.auth import extract_credentials, validate_password, hash_password, ver
 from dotenv import load_dotenv
 load_dotenv()
 
+API_KEY = "90uBf0XhCKWcFaHIETqBxJkAqaIzM1cQ"
+MAX_DURATION = 60
 client = MongoClient("mongodb://localhost:27017/")
 db = client["server"]
 messages_collection = db["CSE312"]
@@ -837,14 +840,14 @@ def handle_video_upload(request, handler):
     try:
         auth_token = request.cookies.get("auth_token")
         if not auth_token:
-            res.set_status(401, "Unauthorized").text("login requesed")
+            res.set_status(401, "Unauthorized").text("Login required")
             handler.request.sendall(res.to_data())
             return
 
         hashed_token = hash_token(auth_token)
         user = users_collection.find_one({"auth_token": hashed_token})
         if not user:
-            res.set_status(401, "Unauthorized").text("Invalid auth token")
+            res.set_status(401, "Unauthorized").text("Invalid authentication token")
             handler.request.sendall(res.to_data())
             return
 
@@ -855,38 +858,100 @@ def handle_video_upload(request, handler):
         video_part = next((p for p in multipart_data.parts if p.name == "video" and p.filename), None)
 
         if not all([title_part, video_part]):
-            res.set_status(400, "Bad Request1").text("Invalid request")
+            res.set_status(400, "Bad Request").text("Missing required fields")
             handler.request.sendall(res.to_data())
             return
 
         if not video_part.filename.lower().endswith(".mp4"):
-            res.set_status(400, "Bad Request2").text("mp4 only")
+            res.set_status(400, "Bad Request").text("Only MP4 format is supported")
             handler.request.sendall(res.to_data())
             return
 
         video_id = str(uuid.uuid4())
         file_ext = os.path.splitext(video_part.filename)[1]
-        filename = f"{video_id}{file_ext}"
-        save_path = os.path.join("public/videos", filename)
-        os.makedirs("public/videos", exist_ok=True)
+        video_filename = f"{video_id}{file_ext}"
+        video_path = os.path.join("public/videos", video_filename)
+        audio_path = os.path.join("public/audio", f"{video_id}.mp3")
 
-        with open(save_path, "wb") as f:
+        os.makedirs("public/videos", exist_ok=True)
+        os.makedirs("public/audio", exist_ok=True)
+
+        with open(video_path, "wb") as f:
             f.write(video_part.content)
+
+        transcription_id = None
+        try:
+            extract_cmd = [
+                "ffmpeg",
+                "-i", video_path,
+                "-vn",
+                "-acodec", "libmp3lame",
+                "-ar", "44100",
+                "-ac", "2",
+                "-y",
+                audio_path
+            ]
+
+            subprocess.run(
+                extract_cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30
+            )
+
+            if os.path.exists(audio_path):
+                with open(audio_path, "rb") as audio_file:
+                    files = {"file": (f"{video_id}.mp3", audio_file, "audio/mpeg")}
+                    headers = {"Authorization": f"Bearer 90uBf0XhCKWcFaHIETqBxJkAqaIzM1cQ"}
+
+                    api_response = requests.post(
+                        "https://transcription-api.nico.engineer/transcribe",
+                        files=files,
+                        headers=headers,
+                        timeout=15
+                    )
+
+                    if api_response.status_code == 200:
+                        transcription_id = api_response.json().get("unique_id")
+
+        except subprocess.CalledProcessError as e:
+            pass
+        except requests.exceptions.RequestException as e:
+            pass
+        except Exception as e:
+            pass
+
+        try:
+            duration = float(subprocess.check_output(
+                f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {video_path}",
+                shell=True
+            ).decode().strip())
+        except Exception as e:
+            duration = 0
 
         video_data = {
             "author_id": user["user_id"],
             "title": title_part.content.decode("utf-8"),
             "description": description_part.content.decode("utf-8") if description_part else "",
-            "video_path": f"public/videos/{filename}",
+            "video_path": f"public/videos/{video_filename}",
             "created_at": datetime.now().isoformat(),
-            "id": video_id
+            "id": video_id,
+            "duration": round(duration, 2),
+            "transcription_id": transcription_id,
+            "views": 0
         }
+
         videos_collection.insert_one(video_data)
 
-        res.set_status(200, "OK").json({"id": video_id})
+        res.set_status(200, "OK").json({
+            "id": video_id,
+            "message": "Video uploaded successfully",
+            "transcription_status": "pending" if transcription_id else "failed"
+        })
 
     except Exception as e:
-        res.set_status(500, "Internal Error").text(str(e))
+        res.set_status(500, "Internal Server Error").text(f"Server error: {str(e)}")
 
     handler.request.sendall(res.to_data())
 
@@ -899,17 +964,72 @@ def get_all_videos(request, handler):
 
 def get_single_video(request, handler):
     video_id = request.path.split("/")[-1]
-    print(video_id)
     video = videos_collection.find_one({"id": video_id}, {"_id": 0})
     if not video:
-        res = Response().set_status(404, "Not Found").text("视频未找到")
+        res = Response().set_status(404, "Not Found").text("Video not found")
     else:
         res = Response().json({"video": video})
 
     handler.request.sendall(res.to_data())
 
+
 def get_transcriptions(request, handler):
-    res = Response().set_status(200, "un")
+    video_id = request.path.split("/")[-1]
+    video = videos_collection.find_one({"id": video_id})
+
+    if not video or not video.get("transcription_id"):
+        res = Response().set_status(404, "Not Found").text("Transcription not found")
+        handler.request.sendall(res.to_data())
+        return
+
+    try:
+        headers = {"Authorization": "Bearer 90uBf0XhCKWcFaHIETqBxJkAqaIzM1cQ"}
+        api_response = requests.get(
+            f'https://transcription-api.nico.engineer/transcriptions/{video["transcription_id"]}',
+            headers=headers,
+            timeout=10
+        )
+
+        if api_response.status_code == 200:
+            vtt_url = api_response.json().get("s3_url")
+            vtt_response = requests.get(vtt_url)
+            res = Response()
+            res.headers({
+                'Content-Type': 'text/vtt',
+                'Cache-Control': 'max-age=3600'
+            })
+            res.bytes(vtt_response.content)
+        elif api_response.status_code == 420:
+            res = Response().set_status(425, "Too Early").text("Transcription in progress, please try again later")
+        else:
+            res = Response().set_status(500, "Internal Error").text("Transcription service temporarily unavailable")
+
+    except requests.exceptions.Timeout:
+        res = Response().set_status(504, "Gateway Timeout").text("Transcription service response timed out")
+    except Exception as e:
+        res = Response().set_status(500, "Internal Error").text(str(e))
+
+    handler.request.sendall(res.to_data())
+
+
+def update_thumbnail(request, handler):
+    video_id = request.path.split("/")[-1]
+    data = json.loads(request.body.decode())
+
+    try:
+        result = videos_collection.update_one(
+            {"id": video_id},
+            {"$set": {"thumbnailURL": data["thumbnailURL"]}}
+        )
+
+        if result.modified_count == 0:
+            res = Response().set_status(404, "Not Found").json({"message": "Video not found"})
+        else:
+            res = Response().json({"message": "Thumbnail updated successfully"})
+
+    except Exception as e:
+        res = Response().set_status(500, "Internal Error").json({"message": str(e)})
+
     handler.request.sendall(res.to_data())
 
 
@@ -950,7 +1070,9 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("POST", "/api/videos", handle_video_upload, False)
         self.router.add_route("GET", "/api/videos", get_all_videos, True)
         self.router.add_route("GET", "/api/videos/", get_single_video, False)
-        #self.router.add_route("GET", "/api/transcriptions/", get_transcriptions, False)
+        self.router.add_route("GET", "/api/transcriptions/", get_transcriptions, False)
+        self.router.add_route("PUT", "/api/thumbnails/", update_thumbnail, False)
+        self.router.add_route("GET", "/videotube/set-thumbnail", lambda req, hnd: render(req, hnd, "set-thumbnail.html"), False)
         super().__init__(request, client_address, server)
 
 
@@ -989,10 +1111,10 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             remaining -= len(data)
 
         full_request = Request(headers_part + b'\r\n\r\n' + body_part)
-        # print("--- received data ---")
-        # print(headers_part + b'\r\n\r\n' + body_part)
-        # print(body_part)
-        # print("--- end of data ---\n\n")
+        print("--- received data ---")
+        print(headers_part + b'\r\n\r\n' + body_part)
+        print(body_part)
+        print("--- end of data ---\n\n")
         self.router.route_request(full_request, self)
 
         # received_data = self.request.recv(2048)
