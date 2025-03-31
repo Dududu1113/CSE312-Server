@@ -30,7 +30,7 @@ users_collection = db["users"]
 videos_collection = db["videos"]
 
 def publicfile(request, handler):
-    mineType = {".html": "text/html",".css": "text/css",".js": "text/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".webp": "image/webp",".png": "image/png",".json": "application/json",".svg":"image/svg+xml",".mp4": "video/mp4"}
+    mineType = {".html": "text/html",".css": "text/css",".js": "text/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".webp": "image/webp",".png": "image/png",".json": "application/json",".svg":"image/svg+xml",".mp4": "video/mp4",".mp3": "audio/mpeg"}
     path = request.path.replace("/","",1)
 
     if os.path.exists(path):
