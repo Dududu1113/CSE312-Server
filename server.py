@@ -869,38 +869,35 @@ def handle_video_upload(request, handler):
 
         video_id = str(uuid.uuid4())
         file_ext = os.path.splitext(video_part.filename)[1]
-        video_filename = f"{video_id}{file_ext}"
-        video_path = os.path.join("public/videos", video_filename)
-        audio_path = os.path.join("public/audio", f"{video_id}.mp3")
-
+        filename = f"{video_id}{file_ext}"
+        save_path = os.path.join("public/videos", filename)
         os.makedirs("public/videos", exist_ok=True)
-        os.makedirs("public/audio", exist_ok=True)
 
-        with open(video_path, "wb") as f:
+        with open(save_path, "wb") as f:
             f.write(video_part.content)
 
         transcription_id = None
+
         try:
-            extract_cmd = [
-                "ffmpeg",
-                "-i", video_path,
-                "-vn",
-                "-acodec", "libmp3lame",
-                "-ar", "44100",
-                "-ac", "2",
-                "-y",
-                audio_path
-            ]
+            audio_dir = "public/audio"
+            os.makedirs(audio_dir, exist_ok=True)
+            audio_path = os.path.join(audio_dir, f"{video_id}.mp3")
 
             subprocess.run(
-                extract_cmd,
+                ["ffmpeg", "-y", "-i", save_path, "-vn", "-acodec", "libmp3lame", audio_path],
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 timeout=30
             )
 
-            if os.path.exists(audio_path):
+            duration = float(subprocess.check_output(
+                f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {save_path}",
+                shell=True
+            ).decode().strip())
+            if duration >= 60:
+                transcription_id = "Cancelled"
+            if duration <= 60 and os.path.exists(audio_path):
                 with open(audio_path, "rb") as audio_file:
                     files = {"file": (f"{video_id}.mp3", audio_file, "audio/mpeg")}
                     headers = {"Authorization": f"Bearer 90uBf0XhCKWcFaHIETqBxJkAqaIzM1cQ"}
@@ -909,48 +906,84 @@ def handle_video_upload(request, handler):
                         "https://transcription-api.nico.engineer/transcribe",
                         files=files,
                         headers=headers,
-                        timeout=15
+                        timeout=10
                     )
 
                     if api_response.status_code == 200:
                         transcription_id = api_response.json().get("unique_id")
 
         except subprocess.CalledProcessError as e:
-            pass
+            print(f"Audio processing failed: {e.stderr.decode()}")
         except requests.exceptions.RequestException as e:
-            pass
+            print(f"API request failed: {str(e)}")
         except Exception as e:
-            pass
+            print(f"Transcription error: {str(e)}")
 
-        try:
-            duration = float(subprocess.check_output(
-                f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {video_path}",
-                shell=True
-            ).decode().strip())
-        except Exception as e:
-            duration = 0
+        thumbnails = []
+        thumbnail_dir = "public/imgs/thumbnails"
+        os.makedirs(thumbnail_dir, exist_ok=True)
+
+        time_points = [
+            0,
+            duration * 0.25,
+            duration * 0.5,
+            duration * 0.75,
+            max(0, duration - 1)
+        ]
+
+        for index, t in enumerate(time_points):
+            thumbnail_path = os.path.join(thumbnail_dir, f"{video_id}_{index}.jpg")
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-ss", str(t),
+                "-i", save_path,
+                "-vframes", "1",
+                "-q:v", "2",
+                "-vf", "scale=300:168:force_original_aspect_ratio=decrease",
+                thumbnail_path
+            ]
+
+            try:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=10
+                )
+                if os.path.exists(thumbnail_path):
+                    thumbnails.append(f"public/imgs/thumbnails/{video_id}_{index}.jpg")
+                else:
+                    print(f"Thumbnail generation failed: {thumbnail_path}")
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                print(f"FFmpeg error: {e.stderr.decode() if e.stderr else 'Unknown error'}")
 
         video_data = {
             "author_id": user["user_id"],
             "title": title_part.content.decode("utf-8"),
             "description": description_part.content.decode("utf-8") if description_part else "",
-            "video_path": f"public/videos/{video_filename}",
+            "video_path": f"public/videos/{filename}",
             "created_at": datetime.now().isoformat(),
             "id": video_id,
-            "duration": round(duration, 2),
-            "transcription_id": transcription_id,
-            "views": 0
+            "thumbnails": thumbnails,
+            "thumbnailURL": thumbnails[0] if thumbnails else "",
+            "views": 0,
+            "duration": duration,
+            "transcription_id": transcription_id
         }
 
         videos_collection.insert_one(video_data)
 
         res.set_status(200, "OK").json({
             "id": video_id,
+            "thumbnails": thumbnails,
             "message": "Video uploaded successfully",
             "transcription_status": "pending" if transcription_id else "failed"
         })
 
     except Exception as e:
+        print(f"Upload error: {str(e)}")
         res.set_status(500, "Internal Server Error").text(f"Server error: {str(e)}")
 
     handler.request.sendall(res.to_data())
@@ -976,6 +1009,11 @@ def get_single_video(request, handler):
 def get_transcriptions(request, handler):
     video_id = request.path.split("/")[-1]
     video = videos_collection.find_one({"id": video_id})
+
+    if video.get("transcription_id") == "Cancelled":
+        res = Response().set_status(200, "OK").text("Transcription cancelled b/c video over 1min")
+        handler.request.sendall(res.to_data())
+        return
 
     if not video or not video.get("transcription_id"):
         res = Response().set_status(404, "Not Found").text("Transcription not found")
@@ -1111,10 +1149,10 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             remaining -= len(data)
 
         full_request = Request(headers_part + b'\r\n\r\n' + body_part)
-        print("--- received data ---")
-        print(headers_part + b'\r\n\r\n' + body_part)
-        print(body_part)
-        print("--- end of data ---\n\n")
+        # print("--- received data ---")
+        # print(headers_part + b'\r\n\r\n' + body_part)
+        # print(body_part)
+        # print("--- end of data ---\n\n")
         self.router.route_request(full_request, self)
 
         # received_data = self.request.recv(2048)
