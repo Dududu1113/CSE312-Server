@@ -923,13 +923,12 @@ def handle_video_upload(request, handler):
         thumbnail_dir = "public/imgs/thumbnails"
         os.makedirs(thumbnail_dir, exist_ok=True)
 
-        ss=duration
         time_points = [
             0,
             duration * 0.25,
             duration * 0.5,
             duration * 0.75,
-            ss
+            max(0, duration - 1)
         ]
 
         for index, t in enumerate(time_points):
