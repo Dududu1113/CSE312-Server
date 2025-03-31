@@ -961,7 +961,6 @@ def handle_video_upload(request, handler):
 
         hls_dir = "public/videos"
         master_playlist = encode_hls_variants(save_path, hls_dir, video_id)
-        print(master_playlist)
 
         video_data = {
             "author_id": user["user_id"],
@@ -974,7 +973,7 @@ def handle_video_upload(request, handler):
             "thumbnailURL": thumbnails[0] if thumbnails else "",
             "duration": duration,
             "transcription_id": transcription_id,
-            "hls_path": master_playlist
+            "hls_path": master_playlist.replace("\\","/")
         }
 
         videos_collection.insert_one(video_data)
@@ -1108,7 +1107,6 @@ def encode_hls_variants(input_path, output_dir, video_id):
     master_path = os.path.join(hls_path, 'master.m3u8')
     with open(master_path, 'w') as f:
         f.write(master_content)
-
     return master_path
 
 
