@@ -968,7 +968,6 @@ def handle_video_upload(request, handler):
             "id": video_id,
             "thumbnails": thumbnails,
             "thumbnailURL": thumbnails[0] if thumbnails else "",
-            "views": 0,
             "duration": duration,
             "transcription_id": transcription_id
         }
