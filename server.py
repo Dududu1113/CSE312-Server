@@ -959,6 +959,10 @@ def handle_video_upload(request, handler):
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
                 print(f"FFmpeg error: {e.stderr.decode() if e.stderr else 'Unknown error'}")
 
+        hls_dir = "public/videos"
+        master_playlist = encode_hls_variants(save_path, hls_dir, video_id)
+        print(master_playlist)
+
         video_data = {
             "author_id": user["user_id"],
             "title": title_part.content.decode("utf-8"),
@@ -969,10 +973,12 @@ def handle_video_upload(request, handler):
             "thumbnails": thumbnails,
             "thumbnailURL": thumbnails[0] if thumbnails else "",
             "duration": duration,
-            "transcription_id": transcription_id
+            "transcription_id": transcription_id,
+            "hls_path": master_playlist
         }
 
         videos_collection.insert_one(video_data)
+
 
         res.set_status(200, "OK").json({
             "id": video_id,
@@ -1068,6 +1074,42 @@ def update_thumbnail(request, handler):
         res = Response().set_status(500, "Internal Error").json({"message": str(e)})
 
     handler.request.sendall(res.to_data())
+
+
+def encode_hls_variants(input_path, output_dir, video_id):
+    variants = [
+        {"height": 720, "bitrate": "3000k", "audio": "128k"},
+        {"height": 480, "bitrate": "1500k", "audio": "96k"}
+    ]
+
+    hls_path = os.path.join(output_dir, video_id)
+    os.makedirs(hls_path, exist_ok=True)
+
+    for var in variants:
+        subprocess.run([
+            'ffmpeg', '-y', '-i', input_path,
+            '-vf', f'scale=-2:{var["height"]}',
+            '-c:v', 'libx264', '-b:v', var["bitrate"],
+            '-c:a', 'aac', '-b:a', var["audio"],
+            '-f', 'hls',
+            '-hls_time', '10',
+            '-hls_list_size', '0',
+            '-hls_segment_filename', f'{hls_path}/{var["height"]}p_%03d.ts',
+            f'{hls_path}/{var["height"]}p.m3u8'
+        ], check=True)
+
+    master_content = '#EXTM3U\n#EXT-X-VERSION:3\n'
+    for var in variants:
+        master_content += (
+            f'#EXT-X-STREAM-INF:BANDWIDTH={int(var["bitrate"][:-1]) * 1000},RESOLUTION=1280x{var["height"]}\n'
+            f'{var["height"]}p.m3u8\n'
+        )
+
+    master_path = os.path.join(hls_path, 'master.m3u8')
+    with open(master_path, 'w') as f:
+        f.write(master_content)
+
+    return master_path
 
 
 class MyTCPHandler(socketserver.BaseRequestHandler):
