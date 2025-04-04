@@ -1,3 +1,4 @@
+import struct
 import sys
 
 from pymongo import MongoClient
@@ -18,8 +19,14 @@ from util.router import Router
 from util.hello_path import hello_path
 from util.auth import extract_credentials, validate_password, hash_password, verify_password, hash_token, \
     generate_auth_token, decodeHelper
+from util.websockets import generate_ws_frame,compute_accept,parse_ws_frame
 from dotenv import load_dotenv
 load_dotenv()
+websocket_connections = set()
+active_ws_connections = set()
+from threading import Lock
+active_users = {}
+active_users_lock = Lock()
 
 API_KEY = "90uBf0XhCKWcFaHIETqBxJkAqaIzM1cQ"
 MAX_DURATION = 60
@@ -28,6 +35,7 @@ db = client["server"]
 messages_collection = db["CSE312"]
 users_collection = db["users"]
 videos_collection = db["videos"]
+drawings_collection = db["drawing"]
 
 def publicfile(request, handler):
     mineType = {".html": "text/html",".css": "text/css",".js": "text/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".webp": "image/webp",".png": "image/png",".json": "application/json",".svg":"image/svg+xml",".mp4": "video/mp4",".mp3": "audio/mpeg"}
@@ -1110,6 +1118,274 @@ def encode_hls_variants(input_path, output_dir, video_id):
     return master_path
 
 
+def handle_websocket_upgrade(request, handler):
+    """处理 WebSocket 升级请求和绘图板消息通信"""
+    auth_token = request.cookies.get("auth_token")
+    user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
+    username = user.get("username")
+    # ==================== 1. WebSocket 握手阶段 ====================
+    if request.headers.get("Upgrade", "").lower() != "websocket":
+        res = Response().set_status(400, "Bad Request").text("Not a websocket request")
+        handler.request.sendall(res.to_data())
+        return
+
+    # 验证客户端握手密钥
+    client_key = request.headers.get("Sec-WebSocket-Key", "")
+    if not client_key:
+        res = Response().set_status(400, "Bad Request").text("Missing Sec-WebSocket-Key")
+        handler.request.sendall(res.to_data())
+        return
+
+    # 计算 Accept 响应头
+    accept_key = compute_accept(client_key)
+
+    # 发送握手响应
+    res = Response()
+    res.set_status(101, "Switching Protocols")
+    res.headers({
+        "Upgrade": "websocket",
+        "Connection": "Upgrade",
+        "Sec-WebSocket-Accept": accept_key
+    })
+    handler.request.sendall(res.to_data())
+
+    with active_users_lock:
+        active_users[handler.request] = username
+
+    # 立即发送初始用户列表
+    broadcast_user_list()
+
+    # ==================== 2. 连接初始化 ====================
+    websocket_connections.add(handler.request)
+
+    try:
+        # 发送历史绘图数据
+        all_strokes = list(drawings_collection.find({}, {"_id": 0}))
+        init_message = {
+            "messageType": "init_strokes",
+            "strokes": all_strokes
+        }
+        handler.request.sendall(generate_ws_frame(json.dumps(init_message).encode('utf-8')))
+
+        # ==================== 3. 消息处理循环 ====================
+        buffer = bytearray()  # 数据缓冲区
+        handler.request.setblocking(False)  # 设为非阻塞模式
+
+        while True:
+            try:
+                # 接收数据块（最大 4KB）
+                chunk = handler.request.recv(4096)
+                if not chunk:  # 连接已关闭
+                    break
+                buffer.extend(chunk)
+
+                # 循环处理缓冲区中的完整帧
+                while True:
+                    # 步骤 1: 检查是否有足够数据解析帧头
+                    if len(buffer) < 2:
+                        break  # 等待更多数据
+
+                    # 步骤 2: 解析基本帧头
+                    first_byte = buffer[0]
+                    second_byte = buffer[1]
+
+                    # 帧元数据解析
+                    fin = (first_byte >> 7) & 0x01  # FIN 标志位
+                    opcode = first_byte & 0x0F  # 操作码
+                    mask_bit = (second_byte >> 7) & 0x01  # 掩码标志
+                    payload_len = second_byte & 0x7F  # 初始负载长度
+
+                    # 步骤 3: 计算扩展负载长度
+                    header_len = 2  # 基本头长度
+                    if payload_len == 126:
+                        if len(buffer) < 4:
+                            break  # 需要更多数据
+                        payload_len = int.from_bytes(buffer[2:4], byteorder='big')
+                        header_len += 2
+                    elif payload_len == 127:
+                        if len(buffer) < 10:
+                            break  # 需要更多数据
+                        payload_len = int.from_bytes(buffer[2:10], byteorder='big')
+                        header_len += 8
+
+                    # 步骤 4: 处理掩码键
+                    mask_key = None
+                    if mask_bit:
+                        header_len += 4  # 掩码键占4字节
+                        if len(buffer) < header_len:
+                            break  # 需要更多数据
+                        mask_key = buffer[header_len - 4:header_len]
+
+                    # 步骤 5: 检查是否收到完整负载
+                    total_frame_len = header_len + payload_len
+                    if len(buffer) < total_frame_len:
+                        break  # 数据不完整，等待更多
+
+                    # 步骤 6: 提取完整帧数据
+                    frame_data = bytes(buffer[:total_frame_len])
+                    del buffer[:total_frame_len]  # 从缓冲区移除已处理数据
+
+                    # 步骤 7: 解析帧内容
+                    frame = parse_ws_frame(frame_data)
+
+                    # 步骤 8: 处理不同操作码
+                    if opcode == 0x1:  # 文本帧
+                        try:
+                            # 解码并验证 UTF-8
+                            payload = frame.payload.decode('utf-8', 'strict')
+
+                            # 解析 JSON 消息
+                            msg = json.loads(payload)
+                            if msg.get("messageType") == "echo_client":
+                                # 构造响应消息
+                                response = {
+                                    "messageType": "echo_server",
+                                    "text": msg["text"]
+                                }
+                                response_json = json.dumps(response)
+
+                                # 生成 WebSocket 帧（服务器帧不需要掩码）
+                                # 帧头格式: FIN=1, Opcode=0x1 (Text), Mask=0
+                                header = bytearray()
+                                header.append(0x80 | 0x01)  # FIN=1 + Text frame
+
+                                # 处理不同负载长度
+                                payload_data = response_json.encode('utf-8')
+                                payload_length = len(payload_data)
+
+                                if payload_length <= 125:
+                                    header.append(payload_length)
+                                elif payload_length <= 65535:
+                                    header.append(126)
+                                    header.extend(payload_length.to_bytes(2, 'big'))
+                                else:
+                                    header.append(127)
+                                    header.extend(payload_length.to_bytes(8, 'big'))
+
+                                # 组合完整帧
+                                ws_frame = bytes(header) + payload_data
+
+                                # 发送响应
+                                handler.request.sendall(ws_frame)
+
+                        except UnicodeDecodeError:
+                            print("Invalid UTF-8 payload")
+                        except json.JSONDecodeError:
+                            print("Invalid JSON format")
+                        except KeyError:
+                            print("Missing required 'text' field")
+
+                    elif opcode == 0x8:  # 关闭帧
+                        # 解析关闭状态码
+                        close_code = 1000  # 默认正常关闭
+                        if len(frame.payload) >= 2:
+                            close_code = int.from_bytes(frame.payload[:2], 'big')
+
+                        # 发送关闭确认帧
+                        close_frame = generate_ws_frame(b'')
+                        handler.request.sendall(close_frame)
+
+                        # 关闭连接
+                        handler.request.close()
+                        return
+
+                    elif opcode == 0x9:  # Ping 帧
+                        # 自动响应 Pong 帧
+                        pong_frame = generate_ws_frame(frame.payload)
+                        handler.request.sendall(pong_frame)
+
+                    # 其他 opcode 处理（二进制帧等）
+                    else:
+                        print(f"Unhandled opcode: {opcode}")
+
+                    # ==================== 4. 处理绘图消息 ====================
+                    if opcode == 0x1:  # 文本帧
+                        try:
+                            payload = frame.payload.decode('utf-8')
+                            msg = json.loads(payload)
+
+                            # 处理绘图消息
+                            if msg.get("messageType") == "drawing":
+                                # 验证绘图数据
+                                required_fields = ["startX", "startY", "endX", "endY", "color"]
+                                if all(field in msg for field in required_fields):
+                                    # 存储到数据库
+                                    drawings_collection.insert_one({
+                                        "startX": msg["startX"],
+                                        "startY": msg["startY"],
+                                        "endX": msg["endX"],
+                                        "endY": msg["endY"],
+                                        "color": msg["color"],
+                                        "timestamp": datetime.now().isoformat()
+                                    })
+
+                                    # 广播给其他客户端
+                                    broadcast_frame = generate_ws_frame(payload.encode('utf-8'))
+                                    for conn in websocket_connections:
+                                        if conn != handler.request:  # 不发送给自己
+                                            try:
+                                                conn.sendall(broadcast_frame)
+                                            except:
+                                                websocket_connections.discard(conn)
+                                                conn.close()
+
+                        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                            print(f"Invalid message format: {str(e)}")
+
+                    elif opcode == 0x8:  # 关闭帧
+                        raise ConnectionResetError("Client closed connection")
+
+                    elif opcode == 0x9:  # Ping帧
+                        pong_frame = generate_ws_frame(frame.payload)
+                        handler.request.sendall(pong_frame)
+
+            except BlockingIOError:
+                continue  # 无数据可读时继续循环
+
+            except ConnectionResetError:
+                print("Client disconnected")
+                break
+
+            except Exception as e:
+                print(f"WebSocket error: {str(e)}")
+                break
+
+    finally:
+        # ==================== 5. 连接清理 ====================
+        try:
+            with active_users_lock:
+                if handler.request in active_users:
+                    del active_users[handler.request]
+            broadcast_user_list()
+            websocket_connections.discard(handler.request)
+            handler.request.close()
+            print(f"WebSocket connection closed. Active connections: {len(websocket_connections)}")
+        except Exception as e:
+            print(f"清理连接时出错: {str(e)}")
+
+def broadcast_user_list():
+    """广播当前活跃用户列表给所有客户端"""
+    with active_users_lock:
+        users = [{"username": name} for name in active_users.values()]
+
+    message = {
+        "messageType": "active_users_list",
+        "users": users
+    }
+    frame = generate_ws_frame(json.dumps(message).encode('utf-8'))
+
+    # 广播给所有连接
+    with active_users_lock:
+        for conn in active_users:
+            try:
+                conn.sendall(frame)
+            except:
+                # 连接异常时自动清理
+                if conn in active_users:
+                    del active_users[conn]
+
+
+
 class MyTCPHandler(socketserver.BaseRequestHandler):
 
     def __init__(self, request, client_address, server):
@@ -1150,6 +1426,12 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("GET", "/api/transcriptions/", get_transcriptions, False)
         self.router.add_route("PUT", "/api/thumbnails/", update_thumbnail, False)
         self.router.add_route("GET", "/videotube/set-thumbnail", lambda req, hnd: render(req, hnd, "set-thumbnail.html"), False)
+        self.router.add_route("GET", "/test-websocket", lambda req, hnd: render(req, hnd, "test-websocket.html"), True)
+        self.router.add_route("GET", "/drawing-board", lambda req, hnd: render(req, hnd, "drawing-board.html"), True)
+        #self.router.add_route("GET", "/direct-messaging", lambda req, hnd: render(req, hnd, "direct-messaging.html"),True)
+        #self.router.add_route("GET", "/video-call", lambda req, hnd: render(req, hnd, "video-call.html"), True)
+        #self.router.add_route("GET", "/video-call/", lambda req, hnd: render(req, hnd, "video-call-room.html"), False)
+        self.router.add_route("GET", "/websocket", handle_websocket_upgrade, False)
         super().__init__(request, client_address, server)
 
 
@@ -1217,3 +1499,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
