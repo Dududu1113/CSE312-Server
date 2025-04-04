@@ -1282,12 +1282,11 @@ def handle_websocket_upgrade(request, handler):
 
                                     broadcast_frame = generate_ws_frame(payload.encode('utf-8'))
                                     for conn in websocket_connections:
-                                        if conn != handler.request:
-                                            try:
-                                                conn.sendall(broadcast_frame)
-                                            except:
-                                                websocket_connections.discard(conn)
-                                                conn.close()
+                                        try:
+                                            conn.sendall(broadcast_frame)
+                                        except:
+                                            websocket_connections.discard(conn)
+                                            conn.close()
                         except (UnicodeDecodeError, json.JSONDecodeError) as e:
                             print(f"Invalid message format: {str(e)}")
                     elif opcode == 0x8:
