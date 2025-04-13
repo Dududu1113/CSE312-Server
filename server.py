@@ -26,6 +26,7 @@ websocket_connections = set()
 active_ws_connections = set()
 from threading import Lock
 active_users = {}
+active_ws_users = {}
 active_users_lock = Lock()
 
 API_KEY = "90uBf0XhCKWcFaHIETqBxJkAqaIzM1cQ"
@@ -36,6 +37,7 @@ messages_collection = db["CSE312"]
 users_collection = db["users"]
 videos_collection = db["videos"]
 drawings_collection = db["drawing"]
+direct_messages_collection = db["direct_messages"]
 
 def publicfile(request, handler):
     mineType = {".html": "text/html",".css": "text/css",".js": "text/javascript",".jpg": "image/jpeg",".ico": "image/x-icon",".gif": "image/gif",".webp": "image/webp",".png": "image/png",".json": "application/json",".svg":"image/svg+xml",".mp4": "video/mp4",".mp3": "audio/mpeg"}
@@ -1122,7 +1124,8 @@ def handle_websocket_upgrade(request, handler):
     auth_token = request.cookies.get("auth_token")
     user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
     username = user.get("username")
-
+    """处理 WebSocket 升级请求和绘图板消息通信"""
+    # ==================== 1. WebSocket 握手阶段 ====================
     if request.headers.get("Upgrade", "").lower() != "websocket":
         res = Response().set_status(400, "Bad Request").text("Not a websocket request")
         handler.request.sendall(res.to_data())
@@ -1134,8 +1137,10 @@ def handle_websocket_upgrade(request, handler):
         handler.request.sendall(res.to_data())
         return
 
+    # 计算 Accept 响应头
     accept_key = compute_accept(client_key)
 
+    # 发送握手响应
     res = Response()
     res.set_status(101, "Switching Protocols")
     res.headers({
@@ -1150,9 +1155,31 @@ def handle_websocket_upgrade(request, handler):
 
     broadcast_user_list()
 
+    auth_token = request.cookies.get("auth_token")
+    if not auth_token:
+        handler.request.close()
+        return
+
+    hashed_token = hash_token(auth_token)
+    user = users_collection.find_one({"auth_token": hashed_token})
+    if not user:
+        handler.request.close()
+        return
+
+    active_ws_users[handler.request] = user["username"]
+
+    # ==================== 2. 连接初始化 ====================
     websocket_connections.add(handler.request)
 
+    # 分片消息状态跟踪
+    current_message = {
+        'opcode': None,  # 原始消息类型（0x1=文本，0x2=二进制）
+        'payload': bytearray(),  # 累积的负载数据
+        'fragmented': False  # 是否处于分片接收状态
+    }
+
     try:
+        # 发送历史绘图数据
         all_strokes = list(drawings_collection.find({}, {"_id": 0}))
         init_message = {
             "messageType": "init_strokes",
@@ -1160,28 +1187,32 @@ def handle_websocket_upgrade(request, handler):
         }
         handler.request.sendall(generate_ws_frame(json.dumps(init_message).encode('utf-8')))
 
+        # ==================== 3. 消息处理循环 ====================
         buffer = bytearray()
         handler.request.setblocking(False)
 
         while True:
             try:
+                # 接收数据块（最大 4KB）
                 chunk = handler.request.recv(4096)
                 if not chunk:
                     break
                 buffer.extend(chunk)
 
                 while True:
+                    # 检查是否有足够数据解析帧头
                     if len(buffer) < 2:
                         break
 
+                    # 解析基本帧头
                     first_byte = buffer[0]
                     second_byte = buffer[1]
-
                     fin = (first_byte >> 7) & 0x01
                     opcode = first_byte & 0x0F
                     mask_bit = (second_byte >> 7) & 0x01
                     payload_len = second_byte & 0x7F
 
+                    # 计算扩展负载长度
                     header_len = 2
                     if payload_len == 126:
                         if len(buffer) < 4:
@@ -1194,6 +1225,7 @@ def handle_websocket_upgrade(request, handler):
                         payload_len = int.from_bytes(buffer[2:10], byteorder='big')
                         header_len += 8
 
+                    # 处理掩码键
                     mask_key = None
                     if mask_bit:
                         header_len += 4
@@ -1201,107 +1233,70 @@ def handle_websocket_upgrade(request, handler):
                             break
                         mask_key = buffer[header_len - 4:header_len]
 
-                    total_frame_len = header_len + payload_len
-                    if len(buffer) < total_frame_len:
+                    # 检查完整帧
+                    if len(buffer) < header_len + payload_len:
                         break
 
-                    frame_data = bytes(buffer[:total_frame_len])
-                    del buffer[:total_frame_len]
+                    # 提取帧数据
+                    frame_data = bytes(buffer[:header_len + payload_len])
+                    del buffer[:header_len + payload_len]
 
+                    # 解析帧
                     frame = parse_ws_frame(frame_data)
 
-                    if opcode == 0x1:
-                        try:
-                            payload = frame.payload.decode('utf-8', 'strict')
-                            msg = json.loads(payload)
-                            if msg.get("messageType") == "echo_client":
-                                response = {
-                                    "messageType": "echo_server",
-                                    "text": msg["text"]
-                                }
-                                response_json = json.dumps(response)
+                    # ======== 分片消息处理 ========
+                    if current_message['fragmented']:
+                        if opcode != 0x0:  # 非延续帧
+                            close_frame = generate_ws_frame(b'')
+                            handler.request.sendall(close_frame)
+                            raise ConnectionResetError("Protocol error: Unexpected opcode during fragmentation")
 
-                                header = bytearray()
-                                header.append(0x80 | 0x01)
+                        current_message['payload'].extend(frame.payload)
 
-                                payload_data = response_json.encode('utf-8')
-                                payload_length = len(payload_data)
+                        if fin:  # 最终分片
+                            process_complete_message(
+                                handler,
+                                current_message['opcode'],
+                                bytes(current_message['payload']),
+                                request
+                            )
+                            current_message['opcode'] = None
+                            current_message['payload'] = bytearray()
+                            current_message['fragmented'] = False
+                    else:
+                        if opcode == 0x0:  # 非法延续帧
+                            close_frame = generate_ws_frame(b'')
+                            handler.request.sendall(close_frame)
+                            raise ConnectionResetError("Protocol error: Continuation frame without context")
 
-                                if payload_length <= 125:
-                                    header.append(payload_length)
-                                elif payload_length <= 65535:
-                                    header.append(126)
-                                    header.extend(payload_length.to_bytes(2, 'big'))
-                                else:
-                                    header.append(127)
-                                    header.extend(payload_length.to_bytes(8, 'big'))
+                        current_message['opcode'] = opcode
 
-                                ws_frame = bytes(header) + payload_data
+                        if not fin:  # 开始分片
+                            current_message['fragmented'] = True
+                            current_message['payload'].extend(frame.payload)
+                        else:  # 完整消息
+                            process_complete_message(handler, opcode, frame.payload, request)
 
-                                handler.request.sendall(ws_frame)
-                        except UnicodeDecodeError:
-                            print("Invalid UTF-8 payload")
-                        except json.JSONDecodeError:
-                            print("Invalid JSON format")
-                        except KeyError:
-                            print("Missing required 'text' field")
-
-                    elif opcode == 0x8:
+                    # 控制帧处理
+                    if opcode == 0x8:  # 关闭帧
                         close_code = 1000
                         if len(frame.payload) >= 2:
                             close_code = int.from_bytes(frame.payload[:2], 'big')
+                        handler.request.sendall(generate_ws_frame(b''))
+                        raise ConnectionResetError(f"Client closed connection with code {close_code}")
 
-                        close_frame = generate_ws_frame(b'')
-                        handler.request.sendall(close_frame)
-                        handler.request.close()
-                        return
+                    elif opcode == 0x9:  # Ping帧
+                        handler.request.sendall(generate_ws_frame(frame.payload))
 
-                    elif opcode == 0x9:
-                        pong_frame = generate_ws_frame(frame.payload)
-                        handler.request.sendall(pong_frame)
-
-                    else:
-                        print(f"Unhandled opcode: {opcode}")
-
-                    if opcode == 0x1:
-                        try:
-                            payload = frame.payload.decode('utf-8')
-                            msg = json.loads(payload)
-
-                            if msg.get("messageType") == "drawing":
-                                required_fields = ["startX", "startY", "endX", "endY", "color"]
-                                if all(field in msg for field in required_fields):
-                                    drawings_collection.insert_one({
-                                        "startX": msg["startX"],
-                                        "startY": msg["startY"],
-                                        "endX": msg["endX"],
-                                        "endY": msg["endY"],
-                                        "color": msg["color"],
-                                        "timestamp": datetime.now().isoformat()
-                                    })
-
-                                    broadcast_frame = generate_ws_frame(payload.encode('utf-8'))
-                                    for conn in websocket_connections:
-                                        try:
-                                            conn.sendall(broadcast_frame)
-                                        except:
-                                            websocket_connections.discard(conn)
-                                            conn.close()
-                        except (UnicodeDecodeError, json.JSONDecodeError) as e:
-                            print(f"Invalid message format: {str(e)}")
-                    elif opcode == 0x8:
-                        raise ConnectionResetError("Client closed connection")
-                    elif opcode == 0x9:
-                        pong_frame = generate_ws_frame(frame.payload)
-                        handler.request.sendall(pong_frame)
             except BlockingIOError:
                 continue
-            except ConnectionResetError:
-                print("Client disconnected")
+            except ConnectionResetError as e:
+                print(f"Connection reset: {str(e)}")
                 break
             except Exception as e:
                 print(f"WebSocket error: {str(e)}")
                 break
+
     finally:
         try:
             with active_users_lock:
@@ -1313,6 +1308,159 @@ def handle_websocket_upgrade(request, handler):
             print(f"WebSocket connection closed. Active connections: {len(websocket_connections)}")
         except Exception as e:
             print(f"Error during connection cleanup: {str(e)}")
+
+
+def process_complete_message(handler, opcode, payload, request):
+    """处理完整的WebSocket消息"""
+    auth_token = request.cookies.get("auth_token")
+    user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
+    username = user.get("username")
+    try:
+        if opcode == 0x1:  # 文本消息
+            message = payload.decode('utf-8', 'strict')
+            msg = json.loads(message)
+            current_user = get_current_user(handler,request)
+
+            # 处理echo请求
+            if msg.get("messageType") == "echo_client":
+                response = {
+                    "messageType": "echo_server",
+                    "text": msg["text"]
+                }
+                handler.request.sendall(generate_ws_frame(json.dumps(response).encode()))
+
+            # 处理获取所有用户请求
+            elif msg.get("messageType") == "get_all_users":
+                if not current_user:
+                    send_error(handler, "Authentication required")
+                    return
+
+                # 从数据库获取所有用户（排除敏感字段）
+                all_users = list(users_collection.find(
+                    {},
+                    {"_id": 0, "username": 1, "user_id": 1}
+                ))
+
+                response = {
+                    "messageType": "all_users_list",
+                    "users": all_users
+                }
+                handler.request.sendall(generate_ws_frame(json.dumps(response).encode()))
+
+            # 处理选择用户请求（获取历史消息）
+            elif msg.get("messageType") == "select_user":
+                if not current_user:
+                    send_error(handler, "Authentication required")
+                    return
+
+                target_user = msg.get("targetUser")
+                if not target_user:
+                    send_error(handler, "Invalid target user")
+                    return
+
+                # 查询双向历史消息（按时间排序）
+                history = list(direct_messages_collection.find({
+                    "$or": [
+                        {"$and": [
+                            {"fromUser": username},
+                            {"toUser": target_user}
+                        ]},
+                        {"$and": [
+                            {"fromUser": target_user},
+                            {"toUser": username}
+                        ]}
+                    ]
+                }, {"_id": 0}))
+
+                response = {
+                    "messageType": "message_history",
+                    "messages": [{
+                        "messageType": "direct_message",
+                        "fromUser": msg["fromUser"],
+                        "text": msg["text"],
+                    } for msg in history]
+                }
+                handler.request.sendall(generate_ws_frame(json.dumps(response).encode()))
+
+            # 处理直接消息
+            elif msg.get("messageType") == "direct_message":
+                if not current_user:
+                    send_error(handler, "Authentication required")
+                    return
+
+                target_user = msg.get("targetUser")
+                message_text = msg.get("text", "").strip()
+
+                # 验证目标用户存在
+                target_user_data = users_collection.find_one(
+                    {"username": target_user},
+                    {"_id": 0, "username": 1}
+                )
+                if not target_user_data:
+                    send_error(handler, "User not found")
+                    return
+
+                # 存储消息到数据库
+                message_data = {
+                    "messageType": "direct_message",
+                    "fromUser": username,
+                    "toUser": target_user,
+                    "text": message_text,
+                }
+                direct_messages_collection.insert_one(message_data.copy())
+
+                # 构建转发消息
+                forward_msg = {
+                    "messageType": "direct_message",
+                    "fromUser": username,
+                    "text": message_text,
+                }
+                # 发送给发送方（确认送达）
+                handler.request.sendall(generate_ws_frame(json.dumps(forward_msg).encode()))
+
+            # 处理绘图消息
+            elif msg.get("messageType") == "drawing":
+                # 验证数据
+                required_fields = ["startX", "startY", "endX", "endY", "color"]
+                if all(field in msg for field in required_fields):
+                    # 存储到数据库
+                    drawings_collection.insert_one({
+                        "startX": msg["startX"],
+                        "startY": msg["startY"],
+                        "endX": msg["endX"],
+                        "endY": msg["endY"],
+                        "color": msg["color"],
+                        "timestamp": datetime.now().isoformat()
+                    })
+
+                    # 广播给其他客户端
+                    broadcast_frame = generate_ws_frame(message.encode('utf-8'))
+                    for conn in websocket_connections:
+                        if conn != handler.request:
+                            try:
+                                conn.sendall(broadcast_frame)
+                            except:
+                                websocket_connections.discard(conn)
+                                conn.close()
+
+    except UnicodeDecodeError:
+        print("Invalid UTF-8 in message")
+    except json.JSONDecodeError:
+        print("Invalid JSON format")
+    except KeyError as e:
+        print(f"Missing field: {str(e)}")
+
+def get_current_user(handler, request):
+    """从cookie获取当前用户"""
+    return list(users_collection.find({}, {"_id": 0, "user_id": 0, "password": 0, "auth_token": 0, "oauth_provider": 0, "github_access_token": 0, "totp_secret": 0, "imageURL": 0}))
+
+def send_error(handler, message):
+    """发送错误消息"""
+    error_msg = {
+        "messageType": "error",
+        "text": message
+    }
+    handler.request.sendall(generate_ws_frame(json.dumps(error_msg).encode()))
 
 def broadcast_user_list():
     with active_users_lock:
@@ -1374,9 +1522,9 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         self.router.add_route("GET", "/videotube/set-thumbnail", lambda req, hnd: render(req, hnd, "set-thumbnail.html"), False)
         self.router.add_route("GET", "/test-websocket", lambda req, hnd: render(req, hnd, "test-websocket.html"), True)
         self.router.add_route("GET", "/drawing-board", lambda req, hnd: render(req, hnd, "drawing-board.html"), True)
-        #self.router.add_route("GET", "/direct-messaging", lambda req, hnd: render(req, hnd, "direct-messaging.html"),True)
-        #self.router.add_route("GET", "/video-call", lambda req, hnd: render(req, hnd, "video-call.html"), True)
-        #self.router.add_route("GET", "/video-call/", lambda req, hnd: render(req, hnd, "video-call-room.html"), False)
+        self.router.add_route("GET", "/direct-messaging", lambda req, hnd: render(req, hnd, "direct-messaging.html"),True)
+        self.router.add_route("GET", "/video-call", lambda req, hnd: render(req, hnd, "video-call.html"), True)
+        self.router.add_route("GET", "/video-call/", lambda req, hnd: render(req, hnd, "video-call-room.html"), False)
         self.router.add_route("GET", "/websocket", handle_websocket_upgrade, False)
         super().__init__(request, client_address, server)
 
