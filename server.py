@@ -24,11 +24,15 @@ from dotenv import load_dotenv
 load_dotenv()
 websocket_connections = set()
 active_ws_connections = set()
-from threading import Lock
+from threading import Lock, Timer
+
 active_users = {}
 active_calls = {}
 active_ws_users = {}
 active_users_lock = Lock()
+active_ws_users_id = {}
+socket_mapping = {}
+
 
 API_KEY = "90uBf0XhCKWcFaHIETqBxJkAqaIzM1cQ"
 MAX_DURATION = 60
@@ -1169,6 +1173,8 @@ def handle_websocket_upgrade(request, handler):
         return
 
     active_ws_users[handler.request] = user["username"]
+    if user["username"] not in active_ws_users_id:
+        active_ws_users_id.update({user["username"]: id(handler.request)})
 
     # ==================== 2. 连接初始化 ====================
     websocket_connections.add(handler.request)
@@ -1247,48 +1253,48 @@ def handle_websocket_upgrade(request, handler):
                     frame = parse_ws_frame(frame_data)
 
                     # ======== 分片消息处理 ========
-                    # if current_message['fragmented']:
-                    #     if opcode != 0x0:  # 非延续帧
-                    #         close_frame = generate_ws_frame(b'')
-                    #         handler.request.sendall(close_frame)
-                    #         raise ConnectionResetError("Protocol error: Unexpected opcode during fragmentation")
-                    #
-                    #     current_message['payload'].extend(frame.payload)
-                    #
-                    #     if fin:  # 最终分片
-                    #         process_complete_message(
-                    #             handler,
-                    #             current_message['opcode'],
-                    #             bytes(current_message['payload']),
-                    #             request
-                    #         )
-                    #         current_message['opcode'] = None
-                    #         current_message['payload'] = bytearray()
-                    #         current_message['fragmented'] = False
-                    # else:
-                    #     if opcode == 0x0:  # 非法延续帧
-                    #         close_frame = generate_ws_frame(b'')
-                    #         handler.request.sendall(close_frame)
-                    #         raise ConnectionResetError("Protocol error: Continuation frame without context")
-                    #
-                    #     current_message['opcode'] = opcode
-                    #
-                    #     if not fin:  # 开始分片
-                    #         current_message['fragmented'] = True
-                    #         current_message['payload'].extend(frame.payload)
-                    #     else:  # 完整消息
-                    #         process_complete_message(handler, opcode, frame.payload, request)
-                    #
-                    # # 控制帧处理
-                    # if opcode == 0x8:  # 关闭帧
-                    #     close_code = 1000
-                    #     if len(frame.payload) >= 2:
-                    #         close_code = int.from_bytes(frame.payload[:2], 'big')
-                    #     handler.request.sendall(generate_ws_frame(b''))
-                    #     raise ConnectionResetError(f"Client closed connection with code {close_code}")
-                    #
-                    # elif opcode == 0x9:  # Ping帧
-                    #     handler.request.sendall(generate_ws_frame(frame.payload))
+                    if current_message['fragmented']:
+                        if opcode != 0x0:  # 非延续帧
+                            close_frame = generate_ws_frame(b'')
+                            handler.request.sendall(close_frame)
+                            raise ConnectionResetError("Protocol error: Unexpected opcode during fragmentation")
+
+                        current_message['payload'].extend(frame.payload)
+
+                        if fin:  # 最终分片
+                            process_complete_message(
+                                handler,
+                                current_message['opcode'],
+                                bytes(current_message['payload']),
+                                request
+                            )
+                            current_message['opcode'] = None
+                            current_message['payload'] = bytearray()
+                            current_message['fragmented'] = False
+                    else:
+                        if opcode == 0x0:  # 非法延续帧
+                            close_frame = generate_ws_frame(b'')
+                            handler.request.sendall(close_frame)
+                            raise ConnectionResetError("Protocol error: Continuation frame without context")
+
+                        current_message['opcode'] = opcode
+
+                        if not fin:  # 开始分片
+                            current_message['fragmented'] = True
+                            current_message['payload'].extend(frame.payload)
+                        else:  # 完整消息
+                            process_complete_message(handler, opcode, frame.payload, request)
+
+                    # 控制帧处理
+                    if opcode == 0x8:  # 关闭帧
+                        close_code = 1000
+                        if len(frame.payload) >= 2:
+                            close_code = int.from_bytes(frame.payload[:2], 'big')
+                        handler.request.sendall(generate_ws_frame(b''))
+                        raise ConnectionResetError(f"Client closed connection with code {close_code}")
+
+                    elif opcode == 0x9:  # Ping帧
+                        handler.request.sendall(generate_ws_frame(frame.payload))
 
             except BlockingIOError:
                 continue
@@ -1298,48 +1304,6 @@ def handle_websocket_upgrade(request, handler):
             except Exception as e:
                 print(f"WebSocket error: {str(e)}")
                 break
-            if current_message['fragmented']:
-                if opcode != 0x0:  # 非延续帧
-                    close_frame = generate_ws_frame(b'')
-                    handler.request.sendall(close_frame)
-                    raise ConnectionResetError("Protocol error: Unexpected opcode during fragmentation")
-
-                current_message['payload'].extend(frame.payload)
-
-                if fin:  # 最终分片
-                    process_complete_message(
-                        handler,
-                        current_message['opcode'],
-                        bytes(current_message['payload']),
-                        request
-                    )
-                    current_message['opcode'] = None
-                    current_message['payload'] = bytearray()
-                    current_message['fragmented'] = False
-            else:
-                if opcode == 0x0:  # 非法延续帧
-                    close_frame = generate_ws_frame(b'')
-                    handler.request.sendall(close_frame)
-                    raise ConnectionResetError("Protocol error: Continuation frame without context")
-
-                current_message['opcode'] = opcode
-
-                if not fin:  # 开始分片
-                    current_message['fragmented'] = True
-                    current_message['payload'].extend(frame.payload)
-                else:  # 完整消息
-                    process_complete_message(handler, opcode, frame.payload, request)
-
-            # 控制帧处理
-            if opcode == 0x8:  # 关闭帧
-                close_code = 1000
-                if len(frame.payload) >= 2:
-                    close_code = int.from_bytes(frame.payload[:2], 'big')
-                handler.request.sendall(generate_ws_frame(b''))
-                raise ConnectionResetError(f"Client closed connection with code {close_code}")
-
-            elif opcode == 0x9:  # Ping帧
-                handler.request.sendall(generate_ws_frame(frame.payload))
 
     finally:
         try:
@@ -1347,11 +1311,15 @@ def handle_websocket_upgrade(request, handler):
                 if handler.request in active_users:
                     del active_users[handler.request]
             broadcast_user_list()
-            current_call = get_current_call(handler.request)
-            if current_call:
-                remove_from_call(current_call, handler.request)
             websocket_connections.discard(handler.request)
+            active_ws_users_id.pop(user["username"])
             handler.request.close()
+            socket_id = id(handler.request)
+            for call_id in list(active_calls.keys()):
+                if socket_id in active_calls[call_id]["participants"]:
+                    remove_from_call(call_id, socket_id)
+            if socket_id in socket_mapping:
+                del socket_mapping[socket_id]
             print(f"WebSocket connection closed. Active connections: {len(websocket_connections)}")
         except Exception as e:
             print(f"Error during connection cleanup: {str(e)}")
@@ -1489,6 +1457,7 @@ def process_complete_message(handler, opcode, payload, request):
                             except:
                                 websocket_connections.discard(conn)
                                 conn.close()
+
             elif msg.get("messageType") == "get_calls":
                 calls = list(video_calls_collection.find({}, {"_id": 0, "id": 1, "name": 1}))
                 response = {
@@ -1498,68 +1467,98 @@ def process_complete_message(handler, opcode, payload, request):
                 handler.request.sendall(generate_ws_frame(json.dumps(response).encode()))
 
             elif msg.get("messageType") == "join_call":
-                call_id = msg["callId"]
-                username = get_current_user(handler, request)
+                call_id = msg.get("callId")
+                if not call_id:
+                    send_error(handler, "Missing call ID")
+                    return
 
-                # 记录参与者
+                # 获取当前用户
+                auth_token = request.cookies.get("auth_token")
+                user = users_collection.find_one({"auth_token": hash_token(auth_token)}) if auth_token else None
+                if not user:
+                    send_error(handler, "Authentication required")
+                    return
+                username = user["username"]
+
+                # 生成唯一 socket_id 并记录映射关系
+                socket_obj = handler.request  # 当前 WebSocket 连接对象
+                socket_id = id(socket_obj)  # 使用 socket 对象的内存地址作为唯一 ID
+                socket_mapping[socket_id] = socket_obj
+
+                # 初始化或更新房间信息
                 if call_id not in active_calls:
+                    # 从数据库加载房间信息（假设已通过 POST /api/video-calls 创建）
                     call_data = video_calls_collection.find_one({"id": call_id})
                     if not call_data:
-                        send_error(handler, "Call not found")
+                        send_error(handler, "Room not found")
                         return
                     active_calls[call_id] = {
                         "name": call_data["name"],
                         "participants": {}
                     }
 
-                # 存储当前socket连接
-                socket_id = id(handler.request)
-                active_calls[call_id]["participants"][socket_id] = username
+                # 添加参与者
+                active_calls[call_id]["participants"][socket_id] = {
+                    "username": username,
+                    "socket_obj": socket_obj
+                }
 
-                # 发送房间信息
+                # 发送房间信息给当前用户
                 handler.request.sendall(generate_ws_frame(json.dumps({
                     "messageType": "call_info",
                     "name": active_calls[call_id]["name"]
                 }).encode()))
 
-                # 通知现有参与者
-                existing_participants = [{"socketId": str(k), "username": v}
-                                         for k, v in active_calls[call_id]["participants"].items()
-                                         if k != socket_id]
 
+                #print(active_calls[call_id]["participants"].items())
+                # 发送现有参与者列表
+                existing_participants = [
+                    {"socketId": str(id), "username": info["username"]}
+                    for id, info in active_calls[call_id]["participants"].items()
+                ]
+
+                #print(existing_participants)
                 handler.request.sendall(generate_ws_frame(json.dumps({
                     "messageType": "existing_participants",
                     "participants": existing_participants
                 }).encode()))
 
-                # 广播新加入者给所有参与者
-                join_notice = {
+                # 广播新用户加入通知
+                join_msg = {
                     "messageType": "user_joined",
                     "socketId": str(socket_id),
                     "username": username
                 }
-                broadcast_to_call(call_id, join_notice, exclude=socket_id)
+                broadcast_to_call(call_id, join_msg,socket_id)
 
             elif msg.get("messageType") in ["offer", "answer", "ice_candidate"]:
-                call_id = get_current_call(handler.request)
+                call_id = get_current_call(id(handler.request))  # 使用socket id查询
                 if not call_id:
                     return
 
                 target_socket_id = msg["socketId"]
+                sender_info = active_calls[call_id]["participants"].get(id(handler.request))
+
+                if not sender_info:
+                    return
+                if msg["messageType"] == "ice_candidate":
+                    mtype = "candidate"
+                else:
+                    mtype = str(msg["messageType"])
                 forward_msg = {
                     "messageType": msg["messageType"],
                     "socketId": str(id(handler.request)),
-                    "username": active_calls[call_id]["participants"][id(handler.request)],
-                    "data": msg["data"]
+                    "username": sender_info["username"],
+                    mtype: msg[mtype]
                 }
-
-                # 找到目标socket并转发
-                for sock in active_calls[call_id]["participants"]:
-                    if str(sock) == target_socket_id:
-                        try:
-                            sock.sendall(generate_ws_frame(json.dumps(forward_msg).encode()))
-                        except:
-                            remove_from_call(call_id, sock)
+                # 查找目标socket
+                target_info = active_calls[call_id]["participants"].get(int(target_socket_id))
+                print("repeat")
+                if target_info:
+                    try:
+                        target_info["socket_obj"].sendall(generate_ws_frame(json.dumps(forward_msg).encode()))
+                    except:
+                        remove_from_call(call_id, int(target_socket_id))
 
     except UnicodeDecodeError:
         print("Invalid UTF-8 in message")
@@ -1611,32 +1610,70 @@ def handle_create_call(request, handler):
     handler.request.sendall(res.to_data())
 
 
-def broadcast_to_call(call_id, message, exclude=None):
+def broadcast_to_call(call_id, message, exclude_socket_id):
     if call_id not in active_calls:
         return
-    for socket_id in active_calls[call_id]["participants"]:
-        if socket_id != exclude:
-            try:
-                socket_id.sendall(generate_ws_frame(json.dumps(message).encode()))
-            except:
-                remove_from_call(call_id, socket_id)
+
+    participants = active_calls[call_id]["participants"]
+    to_remove = []
+
+    for socket_id, info in participants.items():
+        if socket_id == exclude_socket_id:
+            continue
+
+        socket_obj = info["socket_obj"]
+        try:
+            socket_obj.sendall(generate_ws_frame(json.dumps(message).encode()))
+        except Exception as e:
+            print(f"Failed to send message to {socket_id}: {str(e)}")
+            to_remove.append(socket_id)
+
+    # 清理失效的连接
+    for socket_id in to_remove:
+        remove_from_call(call_id, socket_id)
+
+
+# def broadcast_to_call(call_id, message, exclude):
+#     if call_id not in active_calls:
+#         return
+#     to_delete={}
+#     for socket_id in active_calls[call_id]["participants"]:
+#         if socket_id != exclude:
+#             try:
+#                 socket_id.sendall(generate_ws_frame(json.dumps(message).encode()))
+#             except:
+#                 to_delete.update({call_id: socket_id})
+#     for k,v in to_delete.items():
+#         remove_from_call(k,v)
 
 
 def remove_from_call(call_id, socket_id):
-    if call_id in active_calls and socket_id in active_calls[call_id]["participants"]:
-        username = active_calls[call_id]["participants"][socket_id]
-        del active_calls[call_id]["participants"][socket_id]
+    if call_id not in active_calls:
+        return
+
+    participants = active_calls[call_id]["participants"]
+    if socket_id in participants:
+        # 获取用户名用于通知
+        username = participants[socket_id]["username"]
+
+        # 删除参与者
+        del participants[socket_id]
+
+        # 清理映射表
+        if socket_id in socket_mapping:
+            del socket_mapping[socket_id]
 
         # 广播用户离开通知
         leave_msg = {
             "messageType": "user_left",
-            "socketId": str(socket_id)
+            "socketId": str(socket_id),
+            "username": username
         }
-        broadcast_to_call(call_id, leave_msg)
+        broadcast_to_call(call_id, leave_msg,socket_id)
 
         # 如果房间为空，保留一段时间后删除
-        # if not active_calls[call_id]["participants"]:
-        #     Timer(300, lambda: cleanup_empty_call(call_id)).start()
+        if not participants:
+            Timer(300, lambda: cleanup_empty_call(call_id)).start()
 
 
 def cleanup_empty_call(call_id):
@@ -1644,9 +1681,9 @@ def cleanup_empty_call(call_id):
         del active_calls[call_id]
 
 
-def get_current_call(socket):
+def get_current_call(socket_id):
     for call_id, call_data in active_calls.items():
-        if socket in call_data["participants"]:
+        if socket_id in call_data["participants"]:
             return call_id
     return None
 
