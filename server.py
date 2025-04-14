@@ -1334,6 +1334,7 @@ def process_complete_message(handler, opcode, payload, request):
         if opcode == 0x1:  # 文本消息
             message = payload.decode('utf-8', 'strict')
             msg = json.loads(message)
+            print(msg)
             current_user = get_current_user(handler,request)
 
             # 处理echo请求
@@ -1510,7 +1511,7 @@ def process_complete_message(handler, opcode, payload, request):
                 }).encode()))
 
 
-                #print(active_calls[call_id]["participants"].items())
+                # print(active_calls[call_id]["participants"].items())
                 # 发送现有参与者列表
                 existing_participants = [
                     {"socketId": str(id), "username": info["username"]}
@@ -1553,12 +1554,13 @@ def process_complete_message(handler, opcode, payload, request):
                 }
                 # 查找目标socket
                 target_info = active_calls[call_id]["participants"].get(int(target_socket_id))
-                print("repeat")
+                print(target_info)
                 if target_info:
-                    try:
-                        target_info["socket_obj"].sendall(generate_ws_frame(json.dumps(forward_msg).encode()))
-                    except:
-                        remove_from_call(call_id, int(target_socket_id))
+                    if target_info["socket_obj"] != sender_info["socket_obj"]:
+                        try:
+                            target_info["socket_obj"].sendall(generate_ws_frame(json.dumps(forward_msg).encode()))
+                        except:
+                            remove_from_call(call_id, int(target_socket_id))
 
     except UnicodeDecodeError:
         print("Invalid UTF-8 in message")
