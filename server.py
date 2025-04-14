@@ -1422,12 +1422,11 @@ def process_complete_message(handler, opcode, payload, request):
 
                     broadcast_frame = generate_ws_frame(message.encode('utf-8'))
                     for conn in websocket_connections:
-                        if conn != handler.request:
-                            try:
-                                conn.sendall(broadcast_frame)
-                            except:
-                                websocket_connections.discard(conn)
-                                conn.close()
+                        try:
+                            conn.sendall(broadcast_frame)
+                        except:
+                            websocket_connections.discard(conn)
+                            conn.close()
 
             elif msg.get("messageType") == "get_calls":
                 calls = list(video_calls_collection.find({}, {"_id": 0, "id": 1, "name": 1}))
